@@ -27,7 +27,7 @@ cerebral-mcp = "cerebral.mcp:main"
 
 [project.urls]
 Homepage = "https://github.com/cerebral-storage/cerebral-python-sdk"
-Documentation = "https://cerebral-storage.github.io/cerebral-python-sdk"
+Documentation = "https://docs.cerebral.storage/python-sdk/"
 
 [tool.hatch.version]
 path = "src/cerebral/_version.py"

@@ -375,6 +375,10 @@ CEREBRAL_API_KEY=cak-... python -m cerebral.mcp
 The server reads `CEREBRAL_API_KEY` from the environment on every tool call.
 Only agent keys (`cak-` prefix) are accepted.
 
+## Documentation
+
+Full documentation is available at <https://docs.cerebral.storage/python-sdk/>.
+
 ## Development
 
 ```bash
