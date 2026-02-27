@@ -631,7 +631,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       tags: [Repositories]
-      summary: Update a repository's description or visibility
+      summary: Update a repository's settings
       operationId: updateRepository
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -650,6 +650,12 @@ paths:
                   enum: [private, public]
                 agents_require_approval:
                   type: boolean
+                session_max_duration_days:
+                  type: integer
+                  description: Maximum number of days a session can remain open before cleanup. Must be less than retention_days.
+                retention_days:
+                  type: integer
+                  description: Number of days of commit history to retain. Must be greater than session_max_duration_days.
       responses:
         '200':
           description: Updated repository
@@ -843,6 +849,58 @@ paths:
                 $ref: '#/components/schemas/CommitLog'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/repositories/{repository}/commits/{commit_id}/revert:
+    post:
+      tags: [Commits]
+      summary: Revert a commit
+      description: >
+        Creates a new commit on the repository's default branch that undoes the
+        changes introduced by the specified commit. The target commit must have
+        exactly one parent (root and merge commits are not supported).
+      operationId: revertCommit
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: commit_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: >
+                    Optional commit message. When omitted the server generates
+                    'Revert "<original message>"'.
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Optional metadata to attach to the revert commit.
+      responses:
+        '201':
+          description: Revert commit created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commit_id:
+                    type: string
+                required:
+                  - commit_id
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /organizations/{organization}/repositories/{repository}/log:
     get:
@@ -2729,6 +2787,12 @@ components:
           type: string
           enum: [private, public]
           default: private
+        session_max_duration_days:
+          type: integer
+          description: Maximum number of days a session can remain open before cleanup (default 7). Must be less than retention_days.
+        retention_days:
+          type: integer
+          description: Number of days of commit history to retain (default 14). Must be greater than session_max_duration_days.
 
     Repository:
       type: object
@@ -2748,6 +2812,12 @@ components:
         agents_require_approval:
           type: boolean
           description: When enabled, agent commits return 202 and require human approval
+        session_max_duration_days:
+          type: integer
+          description: Maximum number of days a session can remain open before cleanup
+        retention_days:
+          type: integer
+          description: Number of days of commit history to retain
         created_by_type:
           type: string
           enum: [user, role, agent]
@@ -2833,6 +2903,14 @@ components:
           type: string
         committer:
           type: string
+        committer_type:
+          type: string
+          description: Principal type of the committer (empty for pre-migration commits)
+          enum: [user, role, agent]
+        committer_id:
+          type: string
+          format: uuid
+          description: UUID of the committer principal (empty for pre-migration commits)
         message:
           type: string
         meta_range_id:

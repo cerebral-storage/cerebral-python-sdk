@@ -88,6 +88,8 @@ class RepositoryData:
     name: str = ""
     description: str = ""
     visibility: str = ""
+    session_max_duration_days: int | None = None
+    retention_days: int | None = None
     created_by_type: str = ""
     created_by: str = ""
     created_at: datetime | None = None
@@ -100,6 +102,8 @@ class RepositoryData:
             name=d.get("name", ""),
             description=d.get("description", ""),
             visibility=d.get("visibility", ""),
+            session_max_duration_days=d.get("session_max_duration_days"),
+            retention_days=d.get("retention_days"),
             created_by_type=d.get("created_by_type", ""),
             created_by=d.get("created_by", ""),
             created_at=_parse_dt(d.get("created_at")),
@@ -136,6 +140,8 @@ class RepositoryWithOrg:
 class CommitData:
     id: str = ""
     committer: str = ""
+    committer_type: str = ""
+    committer_id: str = ""
     message: str = ""
     meta_range_id: str = ""
     creation_date: datetime | None = None
@@ -149,6 +155,8 @@ class CommitData:
         return cls(
             id=d.get("id", ""),
             committer=d.get("committer", ""),
+            committer_type=d.get("committer_type", ""),
+            committer_id=d.get("committer_id", ""),
             message=d.get("message", ""),
             meta_range_id=d.get("meta_range_id", ""),
             creation_date=_parse_dt(d.get("creation_date")),

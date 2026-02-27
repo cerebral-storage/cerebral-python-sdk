@@ -9,6 +9,8 @@ from cerebral.resources.objects import ReadOnlyObjectCollection
 COMMIT_JSON = {
     "id": "abc123",
     "committer": "user-1",
+    "committer_type": "user",
+    "committer_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     "message": "initial commit",
     "meta_range_id": "mr-001",
     "creation_date": "2025-07-01T08:30:00Z",
@@ -66,6 +68,8 @@ class TestCommit:
         commit = Commit(repo._client, "test-org", "test-repo", "abc123")
         assert commit.id == "abc123"
         assert commit.committer == "user-1"
+        assert commit.committer_type == "user"
+        assert commit.committer_id == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         assert commit.message == "initial commit"
         assert commit.creation_date is not None
         assert commit.creation_date.year == 2025
@@ -80,6 +84,29 @@ class TestCommit:
         commit = Commit(repo._client, "test-org", "test-repo", "abc123")
         objects = commit.objects
         assert isinstance(objects, ReadOnlyObjectCollection)
+
+    def test_revert(self, mock_api, repo):
+        """commit.revert() POSTs to .../commits/{id}/revert and returns a new Commit."""
+        mock_api.get("/organizations/test-org/repositories/test-repo/commits/abc123").mock(
+            return_value=httpx.Response(200, json=COMMIT_JSON)
+        )
+        mock_api.post(
+            "/organizations/test-org/repositories/test-repo/commits/abc123/revert"
+        ).mock(return_value=httpx.Response(201, json={"commit_id": "revert-1"}))
+        commit = Commit(repo._client, "test-org", "test-repo", "abc123")
+        reverted = commit.revert(message="undo change", metadata={"reason": "bug"})
+        assert isinstance(reverted, Commit)
+        assert reverted.id == "revert-1"
+
+    def test_revert_default_message(self, mock_api, repo):
+        """commit.revert() with no arguments sends empty body."""
+        route = mock_api.post(
+            "/organizations/test-org/repositories/test-repo/commits/abc123/revert"
+        ).mock(return_value=httpx.Response(201, json={"commit_id": "revert-2"}))
+        commit = Commit(repo._client, "test-org", "test-repo", "abc123")
+        reverted = commit.revert()
+        assert reverted.id == "revert-2"
+        assert route.called
 
     def test_diff(self, mock_api, repo):
         """commit.diff() diffs this commit against its first parent."""

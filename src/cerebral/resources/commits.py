@@ -29,6 +29,8 @@ class Commit:
         self._loaded = False
         self._raw: dict[str, Any] = {}
         self._committer: str = ""
+        self._committer_type: str = ""
+        self._committer_id: str = ""
         self._message: str = ""
         self._creation_date: datetime | None = None
         self._parents: list[str] = []
@@ -52,6 +54,8 @@ class Commit:
         self._raw = data
         self._id = data.get("id", self._id)
         self._committer = data.get("committer", "")
+        self._committer_type = data.get("committer_type", "")
+        self._committer_id = data.get("committer_id", "")
         self._message = data.get("message", "")
         self._creation_date = _parse_dt(data.get("creation_date"))
         self._parents = data.get("parents", [])
@@ -68,6 +72,16 @@ class Commit:
     def committer(self) -> str:
         self._ensure_loaded()
         return self._committer
+
+    @property
+    def committer_type(self) -> str:
+        self._ensure_loaded()
+        return self._committer_type
+
+    @property
+    def committer_id(self) -> str:
+        self._ensure_loaded()
+        return self._committer_id
 
     @property
     def message(self) -> str:
@@ -110,6 +124,36 @@ class Commit:
         from cerebral.resources.objects import ReadOnlyObjectCollection
 
         return ReadOnlyObjectCollection(self._client, self._org, self._repo)
+
+    def revert(
+        self,
+        *,
+        message: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> Commit:
+        """Revert this commit.
+
+        Creates a new commit that undoes the changes introduced by this commit.
+        The commit must have exactly one parent (root and merge commits are not
+        supported).
+
+        Args:
+            message: Optional commit message. When omitted the server generates
+                ``'Revert "<original message>"'``.
+            metadata: Optional metadata to attach to the revert commit.
+
+        Returns:
+            A :class:`Commit` representing the newly created revert commit.
+        """
+        body: dict[str, Any] = {}
+        if message is not None:
+            body["message"] = message
+        if metadata is not None:
+            body["metadata"] = metadata
+        data = self._client._post_json(
+            f"{self._repo_path}/commits/{self._id}/revert", json=body
+        )
+        return Commit(self._client, self._org, self._repo, data["commit_id"])
 
     def diff(
         self,

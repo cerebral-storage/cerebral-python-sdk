@@ -92,3 +92,48 @@ class TestRepository:
         session = repo.attach("sess-existing")
         assert isinstance(session, Session)
         assert session.session_id == "sess-existing"
+
+    def test_update_with_retention_settings(self, mock_api, repo):
+        """update() sends session_max_duration_days and retention_days."""
+        route = mock_api.put("/organizations/test-org/repositories/test-repo").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "repo-1",
+                    "organization_id": "org-1",
+                    "name": "test-repo",
+                    "description": "",
+                    "visibility": "private",
+                    "session_max_duration_days": 3,
+                    "retention_days": 30,
+                    "created_by": "user-1",
+                    "created_at": "2025-01-15T10:00:00Z",
+                },
+            )
+        )
+        result = repo.update(session_max_duration_days=3, retention_days=30)
+        assert isinstance(result, RepositoryData)
+        assert result.session_max_duration_days == 3
+        assert result.retention_days == 30
+        assert route.called
+
+    def test_retention_properties(self, mock_api, repo):
+        """Lazy-loaded session_max_duration_days and retention_days properties."""
+        mock_api.get("/organizations/test-org/repositories/test-repo").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "repo-1",
+                    "organization_id": "org-1",
+                    "name": "test-repo",
+                    "description": "",
+                    "visibility": "private",
+                    "session_max_duration_days": 7,
+                    "retention_days": 14,
+                    "created_by": "user-1",
+                    "created_at": "2025-01-15T10:00:00Z",
+                },
+            )
+        )
+        assert repo.session_max_duration_days == 7
+        assert repo.retention_days == 14

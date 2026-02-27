@@ -29,6 +29,8 @@ class OrgRepositoryCollection:
         *,
         description: str = "",
         visibility: str = "private",
+        session_max_duration_days: int | None = None,
+        retention_days: int | None = None,
     ) -> RepositoryData:
         """Create a repository.
 
@@ -36,10 +38,16 @@ class OrgRepositoryCollection:
             name: Repository name.
             description: Optional description.
             visibility: ``"private"`` (default) or ``"public"``.
+            session_max_duration_days: Maximum days a session can remain open.
+            retention_days: Days of commit history to retain.
         """
-        body: dict[str, str] = {"name": name, "visibility": visibility}
+        body: dict[str, str | int] = {"name": name, "visibility": visibility}
         if description:
             body["description"] = description
+        if session_max_duration_days is not None:
+            body["session_max_duration_days"] = session_max_duration_days
+        if retention_days is not None:
+            body["retention_days"] = retention_days
         data = self._client._post_json(
             f"/organizations/{self._org}/repositories", json=body
         )
@@ -103,6 +111,16 @@ class Repository:
     def visibility(self) -> str:
         self._ensure_loaded()
         return str(self._raw.get("visibility", ""))
+
+    @property
+    def session_max_duration_days(self) -> int | None:
+        self._ensure_loaded()
+        return self._raw.get("session_max_duration_days")
+
+    @property
+    def retention_days(self) -> int | None:
+        self._ensure_loaded()
+        return self._raw.get("retention_days")
 
     @property
     def created_by(self) -> str:
@@ -225,13 +243,19 @@ class Repository:
         *,
         description: str | None = None,
         visibility: str | None = None,
+        session_max_duration_days: int | None = None,
+        retention_days: int | None = None,
     ) -> RepositoryData:
-        """Update repository description or visibility."""
-        body: dict[str, str] = {}
+        """Update repository settings."""
+        body: dict[str, str | int] = {}
         if description is not None:
             body["description"] = description
         if visibility is not None:
             body["visibility"] = visibility
+        if session_max_duration_days is not None:
+            body["session_max_duration_days"] = session_max_duration_days
+        if retention_days is not None:
+            body["retention_days"] = retention_days
         data = self._client._put_json(self._repo_path, json=body)
         self._raw = data
         self._loaded = True
