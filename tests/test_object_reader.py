@@ -295,9 +295,7 @@ class TestRangeRequests:
         client = MagicMock()
         client._stream = mock_stream
 
-        reader = ObjectReader(
-            client, "/objects/foo", params={"path": "bar"}, byte_range=(0, 1023)
-        )
+        reader = ObjectReader(client, "/objects/foo", params={"path": "bar"}, byte_range=(0, 1023))
         reader.read()
 
         assert captured_kwargs["headers"]["Range"] == "bytes=0-1023"
@@ -310,9 +308,7 @@ class TestRangeRequests:
         def mock_stream(method, path, **kwargs):
             captured_kwargs.update(kwargs)
             mock_response = MagicMock(spec=httpx.Response)
-            mock_response.headers = httpx.Headers(
-                {"content-range": "bytes 1024-49151/49152"}
-            )
+            mock_response.headers = httpx.Headers({"content-range": "bytes 1024-49151/49152"})
             mock_response.read.return_value = b"rest"
             mock_response.close = MagicMock()
             yield mock_response
@@ -333,9 +329,7 @@ class TestRangeRequests:
             content=b"partial",
             headers={"content-range": "bytes 0-1023/49152"},
         )
-        reader = ObjectReader(
-            client, "/objects/foo", params={}, byte_range=(0, 1023)
-        )
+        reader = ObjectReader(client, "/objects/foo", params={}, byte_range=(0, 1023))
         reader.read()
         assert reader.content_range == "bytes 0-1023/49152"
 

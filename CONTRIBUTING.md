@@ -71,7 +71,7 @@ The project uses pre-commit hooks for:
 
 - **ruff** - linting and auto-fix
 - **ruff-format** - code formatting
-- **gitleaks** - secret scanning
+- **detect-secrets** - secret scanning
 
 These run automatically on `git commit` after installing hooks. They also run in
 CI on every push and pull request.

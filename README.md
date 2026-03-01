@@ -125,6 +125,10 @@ with repo.session() as session:
     with session.objects.get("data/file.csv") as f:
         data = f.read()
 
+    # Read a specific byte range (e.g., first 1 KB)
+    with session.objects.get("data/file.parquet", byte_range=(0, 1023)) as f:
+        header = f.read()
+
     # Stream large objects without caching
     with session.objects.get("data/large.bin", cache=False) as f:
         for chunk in f.iter_bytes(chunk_size=8192):
@@ -339,6 +343,32 @@ with repo.session() as session:
     with session.objects.get("large-file.bin", cache=False) as f:
         for chunk in f.iter_bytes(chunk_size=1024 * 1024):
             output.write(chunk)
+```
+
+### Byte Range Requests
+
+Use `byte_range` to read only a portion of an object without downloading the full
+content. This is useful for reading file headers, tailing logs, or formats like
+Parquet that support random access.
+
+```python
+# Read the first 4 bytes (e.g., a magic number)
+with repo.objects.get("data/file.parquet", byte_range=(0, 3)) as f:
+    magic = f.read()
+
+# Read from offset 1024 to end of file
+with repo.objects.get("data/file.parquet", byte_range=(1024, None)) as f:
+    tail = f.read()
+```
+
+The reader exposes the `content_range` property with the server's `Content-Range`
+header value (e.g., `"bytes 0-3/49152"`):
+
+```python
+with repo.objects.get("data/file.parquet", byte_range=(0, 1023)) as f:
+    data = f.read()
+    print(f.content_range)   # "bytes 0-1023/49152"
+    print(f.content_length)  # 1024
 ```
 
 ## MCP Server

@@ -48,9 +48,7 @@ class OrgRepositoryCollection:
             body["session_max_duration_days"] = session_max_duration_days
         if retention_days is not None:
             body["retention_days"] = retention_days
-        data = self._client._post_json(
-            f"/organizations/{self._org}/repositories", json=body
-        )
+        data = self._client._post_json(f"/organizations/{self._org}/repositories", json=body)
         return RepositoryData.from_dict(data)
 
     def list(self, *, after: str | None = None) -> PaginatedIterator[RepositoryData]:

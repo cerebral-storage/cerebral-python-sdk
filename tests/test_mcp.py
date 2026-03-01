@@ -9,6 +9,7 @@ import httpx
 import pytest
 import respx
 
+from cerebral._version import __version__
 from cerebral.mcp import server as mcp_server
 
 BASE_URL = "https://cerebral.storage/api/v1"
@@ -742,4 +743,4 @@ class TestMcpUserAgent:
         """With client info, both cerebral-mcp and client identity are included."""
         ctx = _make_ctx(client_name="claude-desktop", client_version="1.2.3")
         ua = mcp_server._build_mcp_user_agent(ctx)
-        assert ua == "cerebral-mcp/0.3.0 claude-desktop/1.2.3"
+        assert ua == f"cerebral-mcp/{__version__} claude-desktop/1.2.3"

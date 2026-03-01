@@ -1,6 +1,7 @@
 """Tests for Session resource."""
 
 import warnings
+from typing import ClassVar
 from unittest.mock import patch
 
 import httpx
@@ -37,9 +38,7 @@ class TestSessionCommitRollback:
         )
         commit_route = mock_api.post(
             "/organizations/test-org/repositories/test-repo/sessions/sess-1"
-        ).mock(
-            return_value=httpx.Response(200, json={"commit_id": "commit-abc"})
-        )
+        ).mock(return_value=httpx.Response(200, json={"commit_id": "commit-abc"}))
         session = repo.session()
         commit_id = session.commit("test commit")
         assert commit_id == "commit-abc"
@@ -66,9 +65,7 @@ class TestSessionContextManager:
         )
         commit_route = mock_api.post(
             "/organizations/test-org/repositories/test-repo/sessions/sess-cm-1"
-        ).mock(
-            return_value=httpx.Response(200, json={"commit_id": "commit-cm"})
-        )
+        ).mock(return_value=httpx.Response(200, json={"commit_id": "commit-cm"}))
         with repo.session() as session:
             assert session.session_id == "sess-cm-1"
             session.commit("explicit commit")
@@ -82,9 +79,8 @@ class TestSessionContextManager:
         rollback_route = mock_api.delete(
             "/organizations/test-org/repositories/test-repo/sessions/sess-cm-2"
         ).mock(return_value=httpx.Response(204))
-        with pytest.raises(ValueError, match="boom"):
-            with repo.session() as session:
-                raise ValueError("boom")
+        with pytest.raises(ValueError, match="boom"), repo.session():
+            raise ValueError("boom")
         assert rollback_route.called
 
     def test_rollback_on_exit_without_commit(self, mock_api, repo):
@@ -95,7 +91,7 @@ class TestSessionContextManager:
         rollback_route = mock_api.delete(
             "/organizations/test-org/repositories/test-repo/sessions/sess-cm-3"
         ).mock(return_value=httpx.Response(204))
-        with repo.session() as session:
+        with repo.session():
             pass  # no commit called
         assert rollback_route.called
 
@@ -106,9 +102,7 @@ class TestSessionContextManager:
         )
         commit_route = mock_api.post(
             "/organizations/test-org/repositories/test-repo/sessions/sess-cm-4"
-        ).mock(
-            return_value=httpx.Response(200, json={"commit_id": "commit-manual"})
-        )
+        ).mock(return_value=httpx.Response(200, json={"commit_id": "commit-manual"}))
         rollback_route = mock_api.delete(
             "/organizations/test-org/repositories/test-repo/sessions/sess-cm-4"
         ).mock(return_value=httpx.Response(204))
@@ -119,12 +113,15 @@ class TestSessionContextManager:
 
 
 class TestSessionApproval:
-    APPROVAL_RESPONSE = {
+    APPROVAL_RESPONSE: ClassVar[dict[str, object]] = {
         "approval_required": True,
         "session_id": "sess-approve-1",
         "message": "Approval required for agent commits",
-        "api_url": "https://cerebral.storage/api/v1/organizations/test-org/repositories/test-repo/sessions/sess-approve-1/approve",
-        "web_url": "https://app.cerebral.storage/test-org/test-repo/approve/sess-approve-1",
+        "api_url": (
+            "https://cerebral.storage/api/v1/organizations/test-org"
+            "/repositories/test-repo/sessions/sess-approve-1/approve"
+        ),
+        "web_url": ("https://app.cerebral.storage/test-org/test-repo/approve/sess-approve-1"),
     }
 
     def test_commit_approval_required_block(self, mock_api, repo):
@@ -141,14 +138,19 @@ class TestSessionApproval:
         ).mock(
             side_effect=[
                 httpx.Response(200),
-                httpx.Response(404, json={"message": "not found", "code": "not_found", "request_id": "r1"}),
+                httpx.Response(
+                    404,
+                    json={"message": "not found", "code": "not_found", "request_id": "r1"},
+                ),
             ]
         )
         session = repo.session()
-        with patch("cerebral.resources.sessions.time.sleep") as mock_sleep:
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                commit_id = session.commit("agent changes")
+        with (
+            patch("cerebral.resources.sessions.time.sleep") as mock_sleep,
+            warnings.catch_warnings(record=True) as w,
+        ):
+            warnings.simplefilter("always")
+            commit_id = session.commit("agent changes")
         assert commit_id == ""
         assert len(w) == 1
         assert "Approval required" in str(w[0].message)

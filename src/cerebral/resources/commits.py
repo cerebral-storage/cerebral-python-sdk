@@ -157,9 +157,7 @@ class Commit:
             body["message"] = message
         if metadata is not None:
             body["metadata"] = metadata
-        data = self._client._post_json(
-            f"{self._repo_path}/commits/{self._id}/revert", json=body
-        )
+        data = self._client._post_json(f"{self._repo_path}/commits/{self._id}/revert", json=body)
         return Commit(self._client, self._org, self._repo, data["commit_id"])
 
     def diff(

@@ -114,6 +114,19 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 
 - The OAuth2 endpoints in `openapi.yaml` (`/auth/oauth/*`) are browser-based flows and do **not** need to be implemented in the SDK.
 
+## Verification
+
+After modifying Python code, always run the full check suite before considering the task done:
+
+```
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
+uv run mypy src/cerebral/
+uv run pytest
+```
+
+If ruff format reports issues, run `uv run ruff format src/ tests/` to auto-fix.
+
 ## Code Style
 
 - **Ruff** with line-length 100, target Python 3.11

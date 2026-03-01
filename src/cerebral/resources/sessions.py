@@ -64,9 +64,7 @@ class Session:
         """Object access within this session (read and write)."""
         from cerebral.resources.objects import SessionObjectCollection
 
-        return SessionObjectCollection(
-            self._client, self._org, self._repo, self._session_id
-        )
+        return SessionObjectCollection(self._client, self._org, self._repo, self._session_id)
 
     def uncommitted(
         self,
@@ -140,7 +138,7 @@ class Session:
             data = response.json()
             web_url = data.get("web_url", "")
             warnings.warn(
-                f"Approval required – review and approve at: {web_url}",
+                f"Approval required - review and approve at: {web_url}",
                 stacklevel=2,
             )
             self._committed = True

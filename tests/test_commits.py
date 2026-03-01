@@ -92,9 +92,9 @@ class TestCommit:
         mock_api.get("/organizations/test-org/repositories/test-repo/commits/abc123").mock(
             return_value=httpx.Response(200, json=COMMIT_JSON)
         )
-        mock_api.post(
-            "/organizations/test-org/repositories/test-repo/commits/abc123/revert"
-        ).mock(return_value=httpx.Response(201, json={"commit_id": "revert-1"}))
+        mock_api.post("/organizations/test-org/repositories/test-repo/commits/abc123/revert").mock(
+            return_value=httpx.Response(201, json={"commit_id": "revert-1"})
+        )
         commit = Commit(repo._client, "test-org", "test-repo", "abc123")
         reverted = commit.revert(message="undo change", metadata={"reason": "bug"})
         assert isinstance(reverted, Commit)
