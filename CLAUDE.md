@@ -127,6 +127,15 @@ uv run pytest
 
 If ruff format reports issues, run `uv run ruff format src/ tests/` to auto-fix.
 
+## Secret Scanning
+
+Pre-commit and CI use **detect-secrets** (Yelp, Apache 2.0) to catch leaked credentials. Known false positives (dummy test keys, env var names, doc placeholders) are tracked in `.secrets.baseline` with `"is_secret": false` — **not** with inline `# pragma: allowlist secret` comments, especially not in user-facing files like README.md.
+
+If detect-secrets flags a new false positive:
+1. Regenerate the baseline: `detect-secrets scan --exclude-files '\.mypy_cache' --exclude-files 'uv\.lock' --exclude-files '\.venv' --exclude-files 'dist/' --exclude-files '\.git/' > .secrets.baseline`
+2. Mark false positives: `detect-secrets audit .secrets.baseline` (interactive — press `n` for false positives)
+3. Commit the updated `.secrets.baseline`
+
 ## Code Style
 
 - **Ruff** with line-length 100, target Python 3.11
