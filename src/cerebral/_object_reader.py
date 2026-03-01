@@ -38,18 +38,21 @@ class ObjectReader:
         *,
         cache: bool = True,
         presign: bool = True,
+        byte_range: tuple[int, int | None] | None = None,
     ) -> None:
         self._client = client
         self._path = path
         self._params = params
         self._cache = cache
         self._presign = presign
+        self._byte_range = byte_range
         self._response: httpx.Response | None = None
         self._stream_context: AbstractContextManager[Any] | None = None
         self._cached_content: bytes | None = None
         self._etag: str | None = None
         self._content_type: str | None = None
         self._content_length: int | None = None
+        self._content_range: str | None = None
         self._reproducible: bool | None = None
         self._closed = False
 
@@ -61,6 +64,10 @@ class ObjectReader:
         if self._presign:
             params["presign"] = "true"
             kwargs["follow_redirects"] = True
+        if self._byte_range is not None:
+            start, end = self._byte_range
+            range_val = f"bytes={start}-{end}" if end is not None else f"bytes={start}-"
+            kwargs["headers"] = {"Range": range_val}
         ctx = self._client._stream("GET", self._path, params=params, **kwargs)
         self._stream_context = ctx
         self._response = ctx.__enter__()
@@ -72,6 +79,7 @@ class ObjectReader:
         self._content_type = response.headers.get("content-type")
         cl = response.headers.get("content-length")
         self._content_length = int(cl) if cl else None
+        self._content_range = response.headers.get("content-range")
         repro = response.headers.get("x-cerebral-reproducible")
         if repro == "true":
             self._reproducible = True
@@ -92,6 +100,11 @@ class ObjectReader:
     def content_length(self) -> int | None:
         """Content-Length header value."""
         return self._content_length
+
+    @property
+    def content_range(self) -> str | None:
+        """Content-Range header value (present for 206 partial content responses)."""
+        return self._content_range
 
     @property
     def reproducible(self) -> bool | None:

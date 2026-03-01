@@ -648,8 +648,6 @@ paths:
                 visibility:
                   type: string
                   enum: [private, public]
-                agents_require_approval:
-                  type: boolean
                 session_max_duration_days:
                   type: integer
                   description: Maximum number of days a session can remain open before cleanup. Must be less than retention_days.
@@ -722,7 +720,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommitSessionResponse'
         '202':
-          description: Approval required (agents_require_approval is enabled and caller is an agent)
+          description: Approval required (policy-based session taint detected for agent caller)
           content:
             application/json:
               schema:
@@ -1013,6 +1011,11 @@ paths:
     get:
       tags: [Objects]
       summary: Get an object's content
+      description: >
+        Supports HTTP Range requests (single ranges only). When a valid Range
+        header is present, the server returns 206 Partial Content with the
+        requested byte range. This enables efficient partial reads of large
+        files such as Parquet.
       operationId: getObject
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -1038,9 +1041,15 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: Range
+          in: header
+          required: false
+          description: 'HTTP byte range (e.g., "bytes=0-1023"). Only single ranges are supported.'
+          schema:
+            type: string
       responses:
         '200':
-          description: Object content
+          description: Full object content (no Range header or Range not satisfiable)
           headers:
             ETag:
               schema:
@@ -1048,6 +1057,40 @@ paths:
             Content-Type:
               schema:
                 type: string
+            Accept-Ranges:
+              schema:
+                type: string
+                enum: [bytes]
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial content (Range request satisfied)
+          headers:
+            Content-Range:
+              schema:
+                type: string
+                description: 'Byte range delivered, e.g. "bytes 0-1023/49152"'
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+            ETag:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+            Accept-Ranges:
+              schema:
+                type: string
+                enum: [bytes]
           content:
             application/octet-stream:
               schema:
@@ -1065,6 +1108,13 @@ paths:
                 type: string
         '404':
           $ref: '#/components/responses/NotFound'
+        '416':
+          description: Range not satisfiable
+          headers:
+            Content-Range:
+              schema:
+                type: string
+                description: 'Total size, e.g. "bytes */49152"'
     head:
       tags: [Objects]
       summary: Check object existence and metadata
@@ -2153,7 +2203,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       tags: [Agents]
-      summary: Update an agent's description or metadata
+      summary: Update an agent's description, metadata, or inline policy
       operationId: updateAgent
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -2171,6 +2221,9 @@ paths:
                   type: object
                   additionalProperties:
                     type: string
+                inline_policy:
+                  type: string
+                  description: Rego policy source to set as the agent's inline policy. Empty string clears it.
       responses:
         '200':
           description: Updated agent
@@ -2809,9 +2862,6 @@ components:
           type: string
         visibility:
           type: string
-        agents_require_approval:
-          type: boolean
-          description: When enabled, agent commits return 202 and require human approval
         session_max_duration_days:
           type: integer
           description: Maximum number of days a session can remain open before cleanup
@@ -3122,6 +3172,14 @@ components:
           type: object
           additionalProperties:
             type: string
+        inline_policy:
+          type: string
+          description: Rego policy source evaluated inline for this agent
+        inline_policy_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last inline policy update
         created_by_type:
           type: string
           enum: [user, role]

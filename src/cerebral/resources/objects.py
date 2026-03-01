@@ -73,7 +73,14 @@ class ReadOnlyObjectCollection:
 
         return PaginatedIterator(fetch_page)
 
-    def get(self, path: str, *, cache: bool = True, presign: bool = True) -> ObjectReader:
+    def get(
+        self,
+        path: str,
+        *,
+        cache: bool = True,
+        presign: bool = True,
+        byte_range: tuple[int, int | None] | None = None,
+    ) -> ObjectReader:
         """Get an object's content as a streaming reader.
 
         Args:
@@ -81,6 +88,9 @@ class ReadOnlyObjectCollection:
             cache: Cache content in memory after first read (default ``True``).
                 For large objects, use ``cache=False`` and ``.iter_bytes()``.
             presign: Use presigned URL for download (default ``True``).
+            byte_range: Optional ``(start, end)`` byte range for partial reads.
+                For example, ``(0, 1023)`` requests the first 1024 bytes.
+                Use ``(offset, None)`` to read from *offset* to the end.
 
         Returns:
             An :class:`~cerebral._object_reader.ObjectReader`.
@@ -91,6 +101,7 @@ class ReadOnlyObjectCollection:
             {"path": path},
             cache=cache,
             presign=presign,
+            byte_range=byte_range,
         )
 
     def head(self, path: str) -> ObjectMetadata:
@@ -168,7 +179,14 @@ class SessionObjectCollection:
 
         return PaginatedIterator(fetch_page)
 
-    def get(self, path: str, *, cache: bool = True, presign: bool = True) -> ObjectReader:
+    def get(
+        self,
+        path: str,
+        *,
+        cache: bool = True,
+        presign: bool = True,
+        byte_range: tuple[int, int | None] | None = None,
+    ) -> ObjectReader:
         """Get an object's content as a streaming reader."""
         return ObjectReader(
             self._client,
@@ -176,6 +194,7 @@ class SessionObjectCollection:
             {"session_id": self._session_id, "path": path},
             cache=cache,
             presign=presign,
+            byte_range=byte_range,
         )
 
     def head(self, path: str) -> ObjectMetadata:

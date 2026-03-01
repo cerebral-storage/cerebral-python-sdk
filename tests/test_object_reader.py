@@ -276,6 +276,98 @@ class TestPresign:
         assert captured_kwargs["follow_redirects"] is True
 
 
+class TestRangeRequests:
+    def test_byte_range_sends_range_header(self):
+        """byte_range=(0, 1023) sends Range: bytes=0-1023 header."""
+        captured_kwargs = {}
+
+        @contextmanager
+        def mock_stream(method, path, **kwargs):
+            captured_kwargs.update(kwargs)
+            mock_response = MagicMock(spec=httpx.Response)
+            mock_response.headers = httpx.Headers(
+                {"content-range": "bytes 0-1023/49152", "content-length": "1024"}
+            )
+            mock_response.read.return_value = b"partial"
+            mock_response.close = MagicMock()
+            yield mock_response
+
+        client = MagicMock()
+        client._stream = mock_stream
+
+        reader = ObjectReader(
+            client, "/objects/foo", params={"path": "bar"}, byte_range=(0, 1023)
+        )
+        reader.read()
+
+        assert captured_kwargs["headers"]["Range"] == "bytes=0-1023"
+
+    def test_byte_range_open_ended(self):
+        """byte_range=(1024, None) sends Range: bytes=1024- header."""
+        captured_kwargs = {}
+
+        @contextmanager
+        def mock_stream(method, path, **kwargs):
+            captured_kwargs.update(kwargs)
+            mock_response = MagicMock(spec=httpx.Response)
+            mock_response.headers = httpx.Headers(
+                {"content-range": "bytes 1024-49151/49152"}
+            )
+            mock_response.read.return_value = b"rest"
+            mock_response.close = MagicMock()
+            yield mock_response
+
+        client = MagicMock()
+        client._stream = mock_stream
+
+        reader = ObjectReader(
+            client, "/objects/foo", params={"path": "bar"}, byte_range=(1024, None)
+        )
+        reader.read()
+
+        assert captured_kwargs["headers"]["Range"] == "bytes=1024-"
+
+    def test_content_range_extracted(self):
+        """content_range property returns Content-Range header value."""
+        client, _ = make_mock_client(
+            content=b"partial",
+            headers={"content-range": "bytes 0-1023/49152"},
+        )
+        reader = ObjectReader(
+            client, "/objects/foo", params={}, byte_range=(0, 1023)
+        )
+        reader.read()
+        assert reader.content_range == "bytes 0-1023/49152"
+
+    def test_content_range_none_without_range_request(self):
+        """content_range is None when no Range header was sent."""
+        client, _ = make_mock_client(content=b"full")
+        reader = ObjectReader(client, "/objects/foo", params={})
+        reader.read()
+        assert reader.content_range is None
+
+    def test_no_range_header_when_byte_range_is_none(self):
+        """No Range header sent when byte_range is not specified."""
+        captured_kwargs = {}
+
+        @contextmanager
+        def mock_stream(method, path, **kwargs):
+            captured_kwargs.update(kwargs)
+            mock_response = MagicMock(spec=httpx.Response)
+            mock_response.headers = httpx.Headers({})
+            mock_response.read.return_value = b"data"
+            mock_response.close = MagicMock()
+            yield mock_response
+
+        client = MagicMock()
+        client._stream = mock_stream
+
+        reader = ObjectReader(client, "/objects/foo", params={"path": "bar"})
+        reader.read()
+
+        assert "headers" not in captured_kwargs
+
+
 class TestLazyOpening:
     def test_stream_not_opened_until_read(self):
         stream_opened = False
