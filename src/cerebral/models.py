@@ -312,6 +312,20 @@ class PutObjectResult:
 
 @_compact_repr
 @dataclass(slots=True)
+class CopyObjectResult:
+    source_path: str = ""
+    destination_path: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> CopyObjectResult:
+        return cls(
+            source_path=d.get("source_path", ""),
+            destination_path=d.get("destination_path", ""),
+        )
+
+
+@_compact_repr
+@dataclass(slots=True)
 class CommitResult:
     """Structured result from a session commit.
 
@@ -805,4 +819,110 @@ class SandboxData:
             created_at=_parse_dt(d.get("created_at")),
             updated_at=_parse_dt(d.get("updated_at")),
             finished_at=_parse_dt(d.get("finished_at")),
+        )
+
+
+# --- Sandbox Triggers ---
+
+
+@_compact_repr
+@dataclass(slots=True)
+class SandboxTriggerCondition:
+    type: str = ""
+    prefix: str = ""
+    path: str = ""
+    diff_type: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SandboxTriggerCondition:
+        return cls(
+            type=d.get("type", ""),
+            prefix=d.get("prefix", ""),
+            path=d.get("path", ""),
+            diff_type=d.get("diff_type", ""),
+        )
+
+
+@_compact_repr
+@dataclass(slots=True)
+class SandboxTriggerConfig:
+    image: str
+    command: list[str] = field(default_factory=list)
+    mountpoint: str = ""
+    path_prefix: str = ""
+    timeout_seconds: int | None = None
+    env_vars: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SandboxTriggerConfig:
+        return cls(
+            image=d.get("image", ""),
+            command=d.get("command", []),
+            mountpoint=d.get("mountpoint", ""),
+            path_prefix=d.get("path_prefix", ""),
+            timeout_seconds=d.get("timeout_seconds"),
+            env_vars=d.get("env_vars", {}),
+        )
+
+
+@_compact_repr
+@dataclass(slots=True)
+class SandboxTriggerData:
+    id: str = ""
+    repository_id: str = ""
+    name: str = ""
+    description: str = ""
+    enabled: bool = False
+    conditions: list[SandboxTriggerCondition] = field(default_factory=list)
+    sandbox_config: SandboxTriggerConfig | None = None
+    run_as: dict[str, str] | None = None
+    created_by: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SandboxTriggerData:
+        sc = d.get("sandbox_config")
+        return cls(
+            id=d.get("id", ""),
+            repository_id=d.get("repository_id", ""),
+            name=d.get("name", ""),
+            description=d.get("description", ""),
+            enabled=d.get("enabled", False),
+            conditions=[SandboxTriggerCondition.from_dict(c) for c in d.get("conditions", [])],
+            sandbox_config=SandboxTriggerConfig.from_dict(sc) if sc else None,
+            run_as=d.get("run_as"),
+            created_by=d.get("created_by", ""),
+            created_at=_parse_dt(d.get("created_at")),
+            updated_at=_parse_dt(d.get("updated_at")),
+        )
+
+
+@_compact_repr
+@dataclass(slots=True)
+class SandboxTriggerRunData:
+    id: str = ""
+    repository_id: str = ""
+    trigger_id: str = ""
+    commit_id: str = ""
+    status: str = ""
+    reason: str = ""
+    sandbox_id: str | None = None
+    matched_paths: list[str] = field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SandboxTriggerRunData:
+        return cls(
+            id=d.get("id", ""),
+            repository_id=d.get("repository_id", ""),
+            trigger_id=d.get("trigger_id", ""),
+            commit_id=d.get("commit_id", ""),
+            status=d.get("status", ""),
+            reason=d.get("reason", ""),
+            sandbox_id=d.get("sandbox_id"),
+            matched_paths=d.get("matched_paths", []),
+            created_at=_parse_dt(d.get("created_at")),
+            updated_at=_parse_dt(d.get("updated_at")),
         )

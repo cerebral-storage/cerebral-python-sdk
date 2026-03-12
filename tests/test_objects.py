@@ -2,7 +2,7 @@
 
 import httpx
 
-from cerebral.models import ListingEntry, ObjectMetadata, PutObjectResult
+from cerebral.models import CopyObjectResult, ListingEntry, ObjectMetadata, PutObjectResult
 
 
 class TestReadOnlyObjectCollection:
@@ -313,6 +313,31 @@ class TestSessionObjectCollection:
         except Exception:
             pass
         assert abort_route.called
+
+    def test_copy(self, mock_api, repo):
+        """POST .../object/copy?session_id=...&source_path=...&destination_path=..."""
+        mock_api.post("/organizations/test-org/repositories/test-repo/sessions").mock(
+            return_value=httpx.Response(201, json={"session_id": "sess-copy-1"})
+        )
+        route = mock_api.post("/organizations/test-org/repositories/test-repo/object/copy").mock(
+            return_value=httpx.Response(
+                201,
+                json={
+                    "source_path": "data/original.csv",
+                    "destination_path": "data/copy.csv",
+                },
+            )
+        )
+        session = repo.session()
+        result = session.objects.copy("data/original.csv", "data/copy.csv")
+        assert isinstance(result, CopyObjectResult)
+        assert result.source_path == "data/original.csv"
+        assert result.destination_path == "data/copy.csv"
+        assert route.called
+        req = route.calls[0].request
+        assert "session_id=sess-copy-1" in str(req.url)
+        assert "source_path=data" in str(req.url)
+        assert "destination_path=data" in str(req.url)
 
     def test_delete(self, mock_api, repo):
         """DELETE .../object?session_id=...&path=foo."""

@@ -11,7 +11,7 @@ import httpx
 from cerebral._object_reader import ObjectReader
 from cerebral._pagination import DEFAULT_PAGE_SIZE, PageResult, PaginatedIterator
 from cerebral.exceptions import APIError, TransportError
-from cerebral.models import ListingEntry, ObjectMetadata, PutObjectResult
+from cerebral.models import CopyObjectResult, ListingEntry, ObjectMetadata, PutObjectResult
 
 if TYPE_CHECKING:
     import builtins
@@ -452,6 +452,26 @@ class SessionObjectCollection:
                     },
                 )
             raise
+
+    def copy(self, source_path: str, destination_path: str) -> CopyObjectResult:
+        """Copy an object within this session.
+
+        Args:
+            source_path: Path of the source object.
+            destination_path: Path for the new copy.
+
+        Returns:
+            A :class:`~cerebral.models.CopyObjectResult`.
+        """
+        data = self._client._post_json(
+            f"{self._repo_path}/object/copy",
+            params={
+                "session_id": self._session_id,
+                "source_path": source_path,
+                "destination_path": destination_path,
+            },
+        )
+        return CopyObjectResult.from_dict(data)
 
     def delete(self, path: str) -> None:
         """Delete an object (stage tombstone in this session)."""

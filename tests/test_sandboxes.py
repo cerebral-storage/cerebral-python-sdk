@@ -32,7 +32,7 @@ class TestCreateSandbox:
         sandbox = repo.sandbox(
             image="python:3.10",
             command=["python", "script.py"],
-            env={"MY_SECRET": "secret_value"},
+            env={"MY_SECRET": "secret_value"},  # pragma: allowlist secret
             mountpoint="/data",
             path_prefix="subdir/",
             timeout_seconds=300,
@@ -44,7 +44,7 @@ class TestCreateSandbox:
         payload = json.loads(route.calls[0].request.content)
         assert payload["image"] == "python:3.10"
         assert payload["command"] == ["python", "script.py"]
-        assert payload["env_vars"] == {"MY_SECRET": "secret_value"}
+        assert payload["env_vars"] == {"MY_SECRET": "secret_value"}  # pragma: allowlist secret
         assert payload["mountpoint"] == "/data"
         assert payload["path_prefix"] == "subdir/"
         assert payload["timeout_seconds"] == 300

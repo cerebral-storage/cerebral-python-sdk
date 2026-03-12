@@ -123,6 +123,9 @@ class Client:
     def _head(self, path: str, **kwargs: Any) -> httpx.Response:
         return self._request("HEAD", path, **kwargs)
 
+    def _patch(self, path: str, **kwargs: Any) -> httpx.Response:
+        return self._request("PATCH", path, **kwargs)
+
     @contextmanager
     def _stream(self, method: str, path: str, **kwargs: Any) -> Iterator[httpx.Response]:
         headers = {**self._auth_headers(), **kwargs.pop("headers", {})}
@@ -148,6 +151,14 @@ class Client:
         response = self._post(path, **kwargs)
         if response.status_code == 204:
             return None
+        try:
+            return response.json()
+        except Exception as exc:
+            raise SerializationError(f"Invalid JSON in response: {exc}") from exc
+
+    def _patch_json(self, path: str, **kwargs: Any) -> Any:
+        """PATCH and parse JSON response."""
+        response = self._patch(path, **kwargs)
         try:
             return response.json()
         except Exception as exc:

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from cerebral.client import Client
     from cerebral.resources.connectors import RepoConnectorCollection
     from cerebral.resources.imports import ImportResource
+    from cerebral.resources.sandbox_triggers import SandboxTriggerResource
     from cerebral.resources.sandboxes import SandboxResource
     from cerebral.resources.secrets import SecretManager
     from cerebral.resources.sessions import Session
@@ -271,6 +272,47 @@ class Repository:
         from cerebral.resources.sandboxes import list_sandboxes
 
         return list_sandboxes(self._client, self._org, self._name, after=after)
+
+    # -- Sandbox Triggers ------------------------------------------------------
+
+    def sandbox_trigger(
+        self,
+        *,
+        name: str,
+        conditions: list[dict[str, Any]],
+        sandbox_config: dict[str, Any],
+        description: str = "",
+        run_as: dict[str, str] | None = None,
+    ) -> SandboxTriggerResource:
+        """Create a sandbox trigger.
+
+        Args:
+            name: Trigger name.
+            conditions: List of condition dicts (``type``, ``prefix``/``path``, ``diff_type``).
+            sandbox_config: Sandbox configuration dict (``image``, ``command``, etc.).
+            description: Optional description.
+            run_as: Run as a different principal (``{"type": "agent", "id": "..."}``)
+        """
+        from cerebral.resources.sandbox_triggers import create_sandbox_trigger
+
+        return create_sandbox_trigger(
+            self._client,
+            self._org,
+            self._name,
+            name=name,
+            conditions=conditions,
+            sandbox_config=sandbox_config,
+            description=description,
+            run_as=run_as,
+        )
+
+    def sandbox_triggers(
+        self, *, after: str | None = None
+    ) -> PaginatedIterator[SandboxTriggerResource]:
+        """List sandbox triggers in this repository."""
+        from cerebral.resources.sandbox_triggers import list_sandbox_triggers
+
+        return list_sandbox_triggers(self._client, self._org, self._name, after=after)
 
     # -- Secrets ---------------------------------------------------------------
 
