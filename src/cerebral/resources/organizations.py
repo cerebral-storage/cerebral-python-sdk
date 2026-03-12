@@ -107,6 +107,9 @@ class OrgResource:
         self._client = client
         self._org = org
 
+    def __repr__(self) -> str:
+        return f"OrgResource('{self._org}')"
+
     @property
     def agents(self) -> AgentCollection:
         """Access agent operations for this organization."""

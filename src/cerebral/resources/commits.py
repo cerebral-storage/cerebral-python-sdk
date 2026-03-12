@@ -40,6 +40,9 @@ class Commit:
         self._total_size: int | None = None
         self._is_stale: bool = False
 
+    def __repr__(self) -> str:
+        return f"Commit(id='{self._id}')"
+
     @property
     def _repo_path(self) -> str:
         return f"/organizations/{self._org}/repositories/{self._repo}"

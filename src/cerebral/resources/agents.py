@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from cerebral._pagination import DEFAULT_PAGE_SIZE, PageResult, PaginatedIterator
-from cerebral.models import Agent, APIKey, APIKeyCreated
+from cerebral.models import Agent, APIKey, APIKeyCreated, SecretEntry
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from cerebral.client import Client
+    from cerebral.resources.secrets import SecretManager
 
 
 class APIKeyCollection:
@@ -76,6 +77,9 @@ class APIKeyResource:
         self._base_path = base_path
         self._data = data
 
+    def __repr__(self) -> str:
+        return f"APIKeyResource(name='{self._data.name}', id='{self._data.id}')"
+
     @property
     def id(self) -> str:
         return self._data.id
@@ -117,6 +121,9 @@ class AgentResource:
         self._org = org
         self._data = data
 
+    def __repr__(self) -> str:
+        return f"AgentResource(name='{self._data.name}')"
+
     @property
     def name(self) -> str:
         return self._data.name
@@ -145,6 +152,20 @@ class AgentResource:
     def api_keys(self) -> APIKeyCollection:
         """Access API key operations for this agent."""
         return APIKeyCollection(self._client, self._org, self._data.name)
+
+    @property
+    def secret(self) -> SecretManager:
+        """Access secret operations for this agent."""
+        from cerebral.resources.secrets import SecretManager
+
+        return SecretManager(
+            self._client,
+            f"/organizations/{self._org}/agents/{self._data.name}/secrets",
+        )
+
+    def secrets(self) -> list[SecretEntry]:
+        """List secrets for this agent (keys and metadata only)."""
+        return self.secret.list()
 
 
 class AgentCollection:

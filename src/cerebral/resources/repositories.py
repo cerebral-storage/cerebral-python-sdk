@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from cerebral._pagination import DEFAULT_PAGE_SIZE, PageResult, PaginatedIterator
-from cerebral.models import CommitData, RepositoryData, _parse_dt
+from cerebral.models import CommitData, RepositoryData, SecretEntry, _parse_dt
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from cerebral.client import Client
     from cerebral.resources.connectors import RepoConnectorCollection
     from cerebral.resources.imports import ImportResource
+    from cerebral.resources.sandboxes import SandboxResource
+    from cerebral.resources.secrets import SecretManager
     from cerebral.resources.sessions import Session
 
 
@@ -82,6 +84,9 @@ class Repository:
         self._name = name
         self._loaded = False
         self._raw: dict[str, Any] = {}
+
+    def __repr__(self) -> str:
+        return f"Repository('{self._org}/{self._name}')"
 
     @property
     def _repo_path(self) -> str:
@@ -219,6 +224,66 @@ class Repository:
             )
 
         return PaginatedIterator(fetch_page)
+
+    # -- Sandboxes -------------------------------------------------------------
+
+    def sandbox(
+        self,
+        *,
+        image: str,
+        command: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        mountpoint: str | None = None,
+        path_prefix: str | None = None,
+        timeout_seconds: int | None = None,
+        run_as: dict[str, str] | None = None,
+    ) -> SandboxResource:
+        """Create and run a sandbox.
+
+        Args:
+            image: Docker image to run.
+            command: Command to execute in the container.
+            env: Environment variables for the container.
+            mountpoint: Path inside the container where data is mounted
+                (default ``"/sandbox"``).
+            path_prefix: Path prefix within the repository to mount
+                (default ``""``).
+            timeout_seconds: Maximum execution time in seconds.
+            run_as: Run as a different principal (``{"type": "agent", "id": "..."}``)
+        """
+        from cerebral.resources.sandboxes import create_sandbox
+
+        return create_sandbox(
+            self._client,
+            self._org,
+            self._name,
+            image=image,
+            command=command,
+            env=env,
+            mountpoint=mountpoint,
+            path_prefix=path_prefix,
+            timeout_seconds=timeout_seconds,
+            run_as=run_as,
+        )
+
+    def sandboxes(self, *, after: str | None = None) -> PaginatedIterator[SandboxResource]:
+        """List sandboxes in this repository."""
+        from cerebral.resources.sandboxes import list_sandboxes
+
+        return list_sandboxes(self._client, self._org, self._name, after=after)
+
+    # -- Secrets ---------------------------------------------------------------
+
+    @property
+    def secret(self) -> SecretManager:
+        """Access secret operations for this repository."""
+        from cerebral.resources.secrets import SecretManager
+
+        return SecretManager(self._client, f"{self._repo_path}/secrets")
+
+    def secrets(self) -> list[SecretEntry]:
+        """List secrets in this repository (keys and metadata only)."""
+        return self.secret.list()
 
     # -- Sub-resources --------------------------------------------------------
 

@@ -44,7 +44,7 @@ openapi.yaml            # OpenAPI spec for the Cerebral API
 - **Resources**: Each API domain has a resource class. The `Client` creates resources; resources hold a back-reference to the client for HTTP calls.
 - **Sessions**: Transactional model — `repo.session()` returns a context manager that auto-rolls back on exception. Supports `commit(message)` and `rollback()`.
 - **Pagination**: Generic `PaginatedIterator[T]` using offset-based `after` cursor, default page size 100.
-- **Models**: Frozen `@dataclass(slots=True)` with `from_dict()` classmethods. ISO 8601 datetime parsing via `_parse_dt()`.
+- **Models**: Frozen `@dataclass(slots=True)` with `from_dict()` classmethods. ISO 8601 datetime parsing via `_parse_dt()`. All dataclass models must use the `@_compact_repr` decorator (defined in `models.py`) so that `repr()` omits default-valued fields. New resource classes (non-dataclass) must define a `__repr__` that shows key identifying info (e.g. `Repository('org/name')`, `Session(id='...')`).
 - **Errors**: `CerebralError` base → `APIError` (HTTP 400+) → status-specific subclasses (401, 403, 404, 409, 410, 412, 423, 5xx). Also `ConfigurationError`, `TransportError`, `SerializationError`.
 - **MCP server** (`src/cerebral/mcp/`): Built on `fastmcp`. Exposes SDK operations as MCP tools for AI agents. Key details:
   - Requires agent keys (`cak-` prefix) — validated on every tool call via `CEREBRAL_API_KEY` env var.

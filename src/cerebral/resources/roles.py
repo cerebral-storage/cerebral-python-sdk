@@ -69,6 +69,9 @@ class RoleAPIKeyResource:
         self._base_path = base_path
         self._data = data
 
+    def __repr__(self) -> str:
+        return f"RoleAPIKeyResource(name='{self._data.name}', id='{self._data.id}')"
+
     @property
     def id(self) -> str:
         return self._data.id
@@ -109,6 +112,9 @@ class RoleResource:
         self._client = client
         self._org = org
         self._data = data
+
+    def __repr__(self) -> str:
+        return f"RoleResource(name='{self._data.name}')"
 
     @property
     def name(self) -> str:

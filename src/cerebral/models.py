@@ -7,9 +7,29 @@ ISO 8601 strings.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field, fields
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
+
+_T = TypeVar("_T")
+
+
+def _compact_repr(cls: type[_T]) -> type[_T]:
+    """Replace dataclass __repr__ with one that omits default-valued fields."""
+
+    def _repr(self: Any) -> str:
+        parts: list[str] = []
+        for f in fields(self):
+            val = getattr(self, f.name)
+            if f.default is not MISSING and val == f.default:
+                continue
+            if f.default_factory is not MISSING and val == f.default_factory():
+                continue
+            parts.append(f"{f.name}={val!r}")
+        return f"{type(self).__name__}({', '.join(parts)})"
+
+    cls.__repr__ = _repr  # type: ignore[method-assign]
+    return cls
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -21,6 +41,7 @@ def _parse_dt(value: str | None) -> datetime | None:
 # --- Organizations ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class Organization:
     id: str
@@ -38,6 +59,7 @@ class Organization:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class OrgSummary:
     id: str
@@ -55,6 +77,7 @@ class OrgSummary:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class Membership:
     organization_id: str
@@ -81,6 +104,7 @@ class Membership:
 # --- Repositories ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class RepositoryData:
     id: str = ""
@@ -110,6 +134,7 @@ class RepositoryData:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class RepositoryWithOrg:
     id: str = ""
@@ -136,6 +161,7 @@ class RepositoryWithOrg:
 # --- Commits ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class CommitData:
     id: str = ""
@@ -172,6 +198,7 @@ class CommitData:
 # --- Objects ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class SourceMetadata:
     connector_id: str = ""
@@ -197,6 +224,7 @@ class SourceMetadata:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class Entry:
     address: str = ""
@@ -223,6 +251,7 @@ class Entry:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class ListingEntry:
     path: str
@@ -241,6 +270,7 @@ class ListingEntry:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class EntryRecord:
     path: str = ""
@@ -255,6 +285,7 @@ class EntryRecord:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class ObjectMetadata:
     """Derived from HEAD response headers."""
@@ -265,6 +296,7 @@ class ObjectMetadata:
     reproducible: bool | None = None
 
 
+@_compact_repr
 @dataclass(slots=True)
 class PutObjectResult:
     path: str = ""
@@ -278,6 +310,7 @@ class PutObjectResult:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class CommitResult:
     """Structured result from a session commit.
@@ -294,6 +327,7 @@ class CommitResult:
 # --- Groups ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class Group:
     id: str = ""
@@ -317,6 +351,7 @@ class Group:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class GroupMember:
     subject_type: str = ""
@@ -336,6 +371,7 @@ class GroupMember:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class GroupDetail:
     """Composite response from ``GET /groups/{group_id}``."""
@@ -353,6 +389,7 @@ class GroupDetail:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class EffectiveGroup:
     group_id: str = ""
@@ -375,6 +412,7 @@ class EffectiveGroup:
 # --- Policies ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class Policy:
     id: str = ""
@@ -404,6 +442,7 @@ class Policy:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class PolicySummary:
     id: str = ""
@@ -429,6 +468,7 @@ class PolicySummary:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class AttachmentRecord:
     policy_id: str = ""
@@ -456,6 +496,7 @@ class AttachmentRecord:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class PolicyDetail:
     """Composite response from ``GET /policies/{policy_id}``."""
@@ -471,6 +512,7 @@ class PolicyDetail:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class EffectivePolicy:
     policy_id: str = ""
@@ -490,6 +532,7 @@ class EffectivePolicy:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class ValidationError:
     line: int = 0
@@ -505,6 +548,7 @@ class ValidationError:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class ValidationResult:
     valid: bool = False
@@ -521,6 +565,7 @@ class ValidationResult:
 # --- Connectors ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class ConnectorInfo:
     id: str = ""
@@ -543,6 +588,7 @@ class ConnectorInfo:
 # --- Import ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class ImportJob:
     id: str = ""
@@ -589,6 +635,7 @@ class ImportJob:
 # --- Roles ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class Role:
     id: str = ""
@@ -619,6 +666,7 @@ class Role:
 # --- Agents ---
 
 
+@_compact_repr
 @dataclass(slots=True)
 class Agent:
     id: str = ""
@@ -644,6 +692,7 @@ class Agent:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class APIKey:
     id: str = ""
@@ -667,6 +716,7 @@ class APIKey:
         )
 
 
+@_compact_repr
 @dataclass(slots=True)
 class APIKeyCreated:
     id: str = ""
@@ -681,4 +731,78 @@ class APIKeyCreated:
             name=d.get("name", ""),
             description=d.get("description", ""),
             token=d.get("token", ""),
+        )
+
+
+# --- Secrets ---
+
+
+@_compact_repr
+@dataclass(slots=True)
+class SecretEntry:
+    name: str = ""
+    created_by_type: str = ""
+    created_by: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SecretEntry:
+        return cls(
+            name=d.get("key", ""),
+            created_by_type=d.get("created_by_type", ""),
+            created_by=d.get("created_by", ""),
+            created_at=_parse_dt(d.get("created_at")),
+            updated_at=_parse_dt(d.get("updated_at")),
+        )
+
+
+# --- Sandboxes ---
+
+
+@_compact_repr
+@dataclass(slots=True)
+class SandboxData:
+    id: str = ""
+    repository_id: str = ""
+    image: str = ""
+    command: list[str] = field(default_factory=list)
+    mountpoint: str = ""
+    path_prefix: str = ""
+    timeout_seconds: int | None = None
+    env_vars: dict[str, str] = field(default_factory=dict)
+    status: str = ""
+    status_reason: str = ""
+    error_message: str = ""
+    exit_code: int | None = None
+    commit_id: str = ""
+    web_url: str = ""
+    created_by_type: str = ""
+    created_by: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    finished_at: datetime | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SandboxData:
+        return cls(
+            id=d.get("id", ""),
+            repository_id=d.get("repository_id", ""),
+            image=d.get("image", ""),
+            command=d.get("command", []),
+            mountpoint=d.get("mountpoint", ""),
+            path_prefix=d.get("path_prefix", ""),
+            timeout_seconds=d.get("timeout_seconds"),
+            env_vars=d.get("env_vars", {}),
+            status=d.get("status", ""),
+            status_reason=d.get("status_reason", ""),
+            error_message=d.get("error_message", ""),
+            exit_code=d.get("exit_code"),
+            commit_id=d.get("commit_id", ""),
+            web_url=d.get("web_url", ""),
+            created_by_type=d.get("created_by_type", ""),
+            created_by=d.get("created_by", ""),
+            created_at=_parse_dt(d.get("created_at")),
+            updated_at=_parse_dt(d.get("updated_at")),
+            finished_at=_parse_dt(d.get("finished_at")),
         )

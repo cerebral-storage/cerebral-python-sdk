@@ -18,6 +18,9 @@ class ImportResource:
         self._org = org
         self._repo = repo
 
+    def __repr__(self) -> str:
+        return f"ImportResource('{self._org}/{self._repo}')"
+
     @property
     def _repo_path(self) -> str:
         return f"/organizations/{self._org}/repositories/{self._repo}"
