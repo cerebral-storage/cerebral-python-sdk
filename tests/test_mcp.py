@@ -12,6 +12,13 @@ import respx
 from tilde._version import __version__
 from tilde.mcp import server as mcp_server
 
+
+def _call(tool_or_fn, **kwargs):
+    """Call an MCP tool function, unwrapping FunctionTool if needed."""
+    fn = getattr(tool_or_fn, "fn", tool_or_fn)
+    return fn(**kwargs)
+
+
 BASE_URL = "https://tilde.run/api/v1"
 ORG = "test-org"
 REPO = "test-repo"
@@ -127,7 +134,7 @@ class TestListRepositories:
                 },
             )
         )
-        result = mcp_server.list_repositories(organization=ORG, ctx=ctx)
+        result = _call(mcp_server.list_repositories, organization=ORG, ctx=ctx)
         assert len(result) == 2
         assert result[0]["id"] == "repo-1"
         assert result[0]["name"] == "repo-one"
@@ -147,7 +154,7 @@ class TestListRepositories:
                 },
             )
         )
-        result = mcp_server.list_repositories(organization=ORG, ctx=ctx)
+        result = _call(mcp_server.list_repositories, organization=ORG, ctx=ctx)
         assert result == []
 
 
@@ -172,8 +179,12 @@ class TestCreateRepository:
                 },
             )
         )
-        result = mcp_server.create_repository(
-            organization=ORG, name="my-repo", description="A new repo", ctx=ctx
+        result = _call(
+            mcp_server.create_repository,
+            organization=ORG,
+            name="my-repo",
+            description="A new repo",
+            ctx=ctx,
         )
         assert result["id"] == "repo-new"
         assert result["name"] == "my-repo"
@@ -185,7 +196,13 @@ class TestCreateRepository:
         from fastmcp.exceptions import ToolError
 
         with pytest.raises(ToolError, match="visibility must be"):
-            mcp_server.create_repository(organization=ORG, name="x", ctx=ctx, visibility="internal")
+            _call(
+                mcp_server.create_repository,
+                organization=ORG,
+                name="x",
+                ctx=ctx,
+                visibility="internal",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +215,7 @@ class TestCreateSession:
         mock_api.post(f"{REPO_PATH}/sessions").mock(
             return_value=httpx.Response(201, json={"session_id": "sess-1"})
         )
-        result = mcp_server.create_session(repository=REPOSITORY, ctx=ctx)
+        result = _call(mcp_server.create_session, repository=REPOSITORY, ctx=ctx)
         assert result == {"session_id": "sess-1", "repository": REPOSITORY}
 
 
@@ -246,7 +263,8 @@ class TestListObjects:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.list_objects(
+        result = _call(
+            mcp_server.list_objects,
             repository=REPOSITORY,
             session_id="sess-1",
             ctx=ctx,
@@ -299,7 +317,7 @@ class TestListObjects:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.list_objects(repository=REPOSITORY, session_id="sess-1", ctx=ctx)
+        result = _call(mcp_server.list_objects, repository=REPOSITORY, session_id="sess-1", ctx=ctx)
         assert len(result) == 1
         assert result[0]["size"] == 42
         assert result[0]["source_metadata"] is None
@@ -323,8 +341,12 @@ class TestListObjects:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.list_objects(
-            repository=REPOSITORY, session_id="sess-1", ctx=ctx, amount=2
+        result = _call(
+            mcp_server.list_objects,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            ctx=ctx,
+            amount=2,
         )
         assert len(result) == 2
 
@@ -332,7 +354,13 @@ class TestListObjects:
         from fastmcp.exceptions import ToolError
 
         with pytest.raises(ToolError, match="positive integer"):
-            mcp_server.list_objects(repository=REPOSITORY, session_id="sess-1", ctx=ctx, amount=0)
+            _call(
+                mcp_server.list_objects,
+                repository=REPOSITORY,
+                session_id="sess-1",
+                ctx=ctx,
+                amount=0,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -352,8 +380,12 @@ class TestGetObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.get_object(
-            repository=REPOSITORY, session_id="sess-1", path="hello.txt", ctx=ctx
+        result = _call(
+            mcp_server.get_object,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            path="hello.txt",
+            ctx=ctx,
         )
         assert result["encoding"] == "utf-8"
         assert result["content"] == "hello world"
@@ -371,8 +403,12 @@ class TestGetObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.get_object(
-            repository=REPOSITORY, session_id="sess-1", path="binary.bin", ctx=ctx
+        result = _call(
+            mcp_server.get_object,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            path="binary.bin",
+            ctx=ctx,
         )
         assert result["encoding"] == "base64"
         assert base64.b64decode(result["content"]) == raw
@@ -385,8 +421,12 @@ class TestGetObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.get_object(
-            repository=REPOSITORY, session_id="sess-1", path="bin.dat", ctx=ctx
+        result = _call(
+            mcp_server.get_object,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            path="bin.dat",
+            ctx=ctx,
         )
         assert result["encoding"] == "base64"
         assert result["content_type"] == "application/octet-stream"
@@ -397,8 +437,12 @@ class TestGetObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.get_object(
-            repository=REPOSITORY, session_id="sess-1", path="text.txt", ctx=ctx
+        result = _call(
+            mcp_server.get_object,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            path="text.txt",
+            ctx=ctx,
         )
         assert result["encoding"] == "utf-8"
         assert result["content_type"] == "text/plain; charset=utf-8"
@@ -423,8 +467,12 @@ class TestHeadObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.head_object(
-            repository=REPOSITORY, session_id="sess-1", path="data/report.csv", ctx=ctx
+        result = _call(
+            mcp_server.head_object,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            path="data/report.csv",
+            ctx=ctx,
         )
         assert result == {
             "path": "data/report.csv",
@@ -438,8 +486,12 @@ class TestHeadObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.head_object(
-            repository=REPOSITORY, session_id="sess-1", path="unknown.bin", ctx=ctx
+        result = _call(
+            mcp_server.head_object,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            path="unknown.bin",
+            ctx=ctx,
         )
         assert result["path"] == "unknown.bin"
         assert result["content_type"] is None
@@ -477,7 +529,8 @@ class TestPutObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.put_object(
+        result = _call(
+            mcp_server.put_object,
             repository=REPOSITORY,
             session_id="sess-1",
             path="data/file.csv",
@@ -494,7 +547,8 @@ class TestPutObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.put_object(
+        result = _call(
+            mcp_server.put_object,
             repository=REPOSITORY,
             session_id="sess-1",
             path="binary.bin",
@@ -508,7 +562,8 @@ class TestPutObject:
         from fastmcp.exceptions import ToolError
 
         with pytest.raises(ToolError, match="encoding must be"):
-            mcp_server.put_object(
+            _call(
+                mcp_server.put_object,
                 repository=REPOSITORY,
                 session_id="sess-1",
                 path="x.txt",
@@ -529,8 +584,12 @@ class TestDeleteObject:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.delete_object(
-            repository=REPOSITORY, session_id="sess-1", path="old.csv", ctx=ctx
+        result = _call(
+            mcp_server.delete_object,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            path="old.csv",
+            ctx=ctx,
         )
         assert result == {"status": "deleted", "path": "old.csv"}
 
@@ -548,8 +607,12 @@ class TestCommitSession:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.commit_session(
-            repository=REPOSITORY, session_id="sess-1", message="update data", ctx=ctx
+        result = _call(
+            mcp_server.commit_session,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            message="update data",
+            ctx=ctx,
         )
         assert result == {
             "status": "committed",
@@ -572,8 +635,12 @@ class TestCommitSession:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.commit_session(
-            repository=REPOSITORY, session_id="sess-1", message="agent changes", ctx=ctx
+        result = _call(
+            mcp_server.commit_session,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            message="agent changes",
+            ctx=ctx,
         )
         assert result["status"] == "approval_required"
         assert result["commit_id"] is None
@@ -592,7 +659,12 @@ class TestCloseSession:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.close_session(repository=REPOSITORY, session_id="sess-1", ctx=ctx)
+        result = _call(
+            mcp_server.close_session,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            ctx=ctx,
+        )
         assert result == {"status": "rolled_back", "session_id": "sess-1"}
         assert (REPOSITORY, "sess-1") not in mcp_server._sessions
 
@@ -606,7 +678,12 @@ class TestCloseSession:
         mcp_server._sessions[(REPOSITORY, "sess-1")] = (
             mcp_server._get_client("cak-test-key").repository(REPOSITORY).attach("sess-1")
         )
-        result = mcp_server.close_session(repository=REPOSITORY, session_id="sess-1", ctx=ctx)
+        result = _call(
+            mcp_server.close_session,
+            repository=REPOSITORY,
+            session_id="sess-1",
+            ctx=ctx,
+        )
         assert result == {"status": "already_closed", "session_id": "sess-1"}
         assert (REPOSITORY, "sess-1") not in mcp_server._sessions
 
@@ -621,8 +698,12 @@ class TestSessionReattach:
         """When the session isn't cached, ``attach()`` is used transparently."""
         mock_api.delete(f"{REPO_PATH}/object").mock(return_value=httpx.Response(204))
         # No pre-seeded session — should reattach automatically
-        result = mcp_server.delete_object(
-            repository=REPOSITORY, session_id="sess-new", path="x.csv", ctx=ctx
+        result = _call(
+            mcp_server.delete_object,
+            repository=REPOSITORY,
+            session_id="sess-new",
+            path="x.csv",
+            ctx=ctx,
         )
         assert result["status"] == "deleted"
         assert (REPOSITORY, "sess-new") in mcp_server._sessions
@@ -646,8 +727,12 @@ class TestErrorMapping:
         from fastmcp.exceptions import ToolError
 
         with pytest.raises(ToolError, match="Not found"):
-            mcp_server.get_object(
-                repository=REPOSITORY, session_id="sess-1", path="missing.txt", ctx=ctx
+            _call(
+                mcp_server.get_object,
+                repository=REPOSITORY,
+                session_id="sess-1",
+                path="missing.txt",
+                ctx=ctx,
             )
 
     def test_401_maps_to_auth_error(self, mock_api: respx.MockRouter, ctx: MagicMock):
@@ -659,7 +744,7 @@ class TestErrorMapping:
         from fastmcp.exceptions import ToolError
 
         with pytest.raises(ToolError, match="Authentication failed"):
-            mcp_server.create_session(repository=REPOSITORY, ctx=ctx)
+            _call(mcp_server.create_session, repository=REPOSITORY, ctx=ctx)
 
     def test_403_maps_to_permission_denied(self, mock_api: respx.MockRouter, ctx: MagicMock):
         mock_api.post(f"{REPO_PATH}/sessions").mock(
@@ -670,7 +755,7 @@ class TestErrorMapping:
         from fastmcp.exceptions import ToolError
 
         with pytest.raises(ToolError, match="Permission denied"):
-            mcp_server.create_session(repository=REPOSITORY, ctx=ctx)
+            _call(mcp_server.create_session, repository=REPOSITORY, ctx=ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -687,7 +772,7 @@ class TestKeyRotation:
         mock_api.post(f"{REPO_PATH}/sessions").mock(
             return_value=httpx.Response(201, json={"session_id": "sess-a"})
         )
-        mcp_server.create_session(repository=REPOSITORY, ctx=ctx)
+        _call(mcp_server.create_session, repository=REPOSITORY, ctx=ctx)
         assert (REPOSITORY, "sess-a") in mcp_server._sessions
         old_client = mcp_server._client
 
@@ -697,7 +782,7 @@ class TestKeyRotation:
         mock_api.post(f"{REPO_PATH}/sessions").mock(
             return_value=httpx.Response(201, json={"session_id": "sess-b"})
         )
-        mcp_server.create_session(repository=REPOSITORY, ctx=ctx)
+        _call(mcp_server.create_session, repository=REPOSITORY, ctx=ctx)
 
         # Old session should be gone, new client created
         assert (REPOSITORY, "sess-a") not in mcp_server._sessions
@@ -716,7 +801,7 @@ class TestMcpUserAgent:
         mock_api.post(f"{REPO_PATH}/sessions").mock(
             return_value=httpx.Response(201, json={"session_id": "sess-1"})
         )
-        mcp_server.create_session(repository=REPOSITORY, ctx=ctx)
+        _call(mcp_server.create_session, repository=REPOSITORY, ctx=ctx)
         ua = mock_api.calls.last.request.headers.get("user-agent", "")
         assert "tilde-python-sdk/" in ua
         assert "tilde-mcp/" in ua
@@ -727,7 +812,7 @@ class TestMcpUserAgent:
         mock_api.post(f"{REPO_PATH}/sessions").mock(
             return_value=httpx.Response(201, json={"session_id": "sess-1"})
         )
-        mcp_server.create_session(repository=REPOSITORY, ctx=ctx_with_client)
+        _call(mcp_server.create_session, repository=REPOSITORY, ctx=ctx_with_client)
         ua = mock_api.calls.last.request.headers.get("user-agent", "")
         assert "tilde-mcp/" in ua
         assert "claude-desktop/1.2.3" in ua
