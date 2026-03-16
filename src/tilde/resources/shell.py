@@ -8,6 +8,7 @@ import uuid
 import warnings
 from typing import TYPE_CHECKING
 
+import click
 from websockets.sync.client import connect as ws_connect
 
 from tilde._output_stream import OutputStream
@@ -24,6 +25,19 @@ if TYPE_CHECKING:
 
 _POLL_INTERVAL = 1.0
 _POLL_TIMEOUT = 300.0
+_SHELL_READY_TIMEOUT = 30.0
+_CMD_TIMEOUT = 300.0
+
+# Binary frame protocol — first byte is the frame type
+_FRAME_STDIN = 0x00  # client → server: stdin data
+_FRAME_STDOUT = 0x01  # server → client: stdout/stderr data
+_FRAME_RESIZE = 0x02  # client → server: JSON resize {"cols":N,"rows":N}
+_FRAME_EXIT = 0x03  # server → client: JSON exit {"exited":true,"exit_code":N}
+
+
+def _send_stdin(ws: ClientConnection, data: str) -> None:
+    """Send stdin data as a binary frame with the 0x00 prefix."""
+    ws.send(bytes([_FRAME_STDIN]) + data.encode("utf-8"))
 
 
 class Shell:
@@ -33,7 +47,7 @@ class Shell:
 
         with repo.shell(image="python:3.12") as sh:
             result = sh.run("echo hello")
-            print(result.stdout)
+            print(result.stdout.text())
 
     On clean exit the sandbox is committed. On exception it is cancelled.
     """
@@ -69,7 +83,7 @@ class Shell:
         # Clean exit — send exit command, close WebSocket, wait for sandbox to finish
         if self._ws is not None:
             with contextlib.suppress(Exception):
-                self._ws.send("exit\n")
+                _send_stdin(self._ws, "exit\n")
         self._close_ws()
         self._wait_for_terminal_state()
 
@@ -92,20 +106,19 @@ class Shell:
         end_marker = f"__TILDE_END_{marker}__"
 
         # Send the command with markers to delimit output
-        wrapped = f"{cmd}; __ec=$?; echo '\\n{begin_marker}'; echo $__ec; echo '{end_marker}'\n"
-        self._ws.send(wrapped)
+        wrapped = f"{cmd}; __ec=$?; echo; echo '{begin_marker}'; echo $__ec; echo '{end_marker}'\n"
+        _send_stdin(self._ws, wrapped)
 
         # Read frames until we find the end marker
         buf = ""
+        deadline = time.monotonic() + _CMD_TIMEOUT
         while end_marker not in buf:
-            try:
-                frame = self._ws.recv(timeout=30)
-            except TimeoutError as exc:
-                raise SandboxError(f"Timeout waiting for command output: {cmd}") from exc
-            if isinstance(frame, bytes):
-                buf += frame.decode("utf-8", errors="replace")
-            else:
-                buf += frame
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SandboxError(f"Timeout waiting for command output: {cmd}")
+            chunk = self._recv_stdout(timeout=min(remaining, 30.0))
+            if chunk is not None:
+                buf += chunk
 
         # Parse output: everything before begin_marker is stdout,
         # between begin_marker and end_marker is exit code
@@ -134,6 +147,38 @@ class Shell:
         return result
 
     # -- Internal helpers ----------------------------------------------------
+
+    def _recv_stdout(self, timeout: float = 30.0) -> str | None:
+        """Receive the next stdout frame, returning decoded text or None on timeout.
+
+        Handles the binary frame protocol: only returns data from 0x01 (stdout)
+        frames.  Strips ``\\r`` (TTY carriage returns) from the output.
+        """
+        if self._ws is None:
+            return None
+        try:
+            frame = self._ws.recv(timeout=timeout)
+        except TimeoutError:
+            return None
+        if isinstance(frame, bytes) and len(frame) > 0:
+            frame_type = frame[0]
+            payload = frame[1:]
+            if frame_type == _FRAME_STDOUT:
+                text = payload.decode("utf-8", errors="replace").replace("\r", "")
+                return click.unstyle(text)
+            # Ignore other frame types (resize, exit) during command execution
+            return None
+        # Unexpected text frame — try to use it as-is
+        if isinstance(frame, str):
+            return click.unstyle(frame.replace("\r", ""))
+        return None
+
+    def _drain(self, timeout: float = 0.5) -> None:
+        """Read and discard any pending frames from the WebSocket."""
+        while True:
+            chunk = self._recv_stdout(timeout=timeout)
+            if chunk is None:
+                break
 
     def _wait_for_running(self) -> None:
         """Poll sandbox status until it reaches 'running' state."""
@@ -165,6 +210,31 @@ class Shell:
             ws_url,
             additional_headers={"Authorization": f"Bearer {api_key}"},
         )
+        self._wait_for_shell_ready()
+
+    def _wait_for_shell_ready(self) -> None:
+        """Configure the TTY and wait for the shell to be responsive."""
+        if self._ws is None:
+            return
+        # Disable terminal echo and set a very wide terminal to prevent
+        # line wrapping from breaking our markers.
+        marker = f"__TILDE_READY_{uuid.uuid4().hex}__"
+        _send_stdin(self._ws, f"export TERM=dumb; stty -echo cols 32767; echo '{marker}'\n")
+        buf = ""
+        deadline = time.monotonic() + _SHELL_READY_TIMEOUT
+        while marker not in buf:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SandboxError(
+                    f"Shell in sandbox {self._sandbox.id} did not become ready "
+                    f"within {_SHELL_READY_TIMEOUT}s"
+                )
+            chunk = self._recv_stdout(timeout=min(remaining, 5.0))
+            if chunk is not None:
+                buf += chunk
+        # Drain any remaining output (prompt, trailing newlines) so
+        # the next run() starts with a clean buffer.
+        self._drain()
 
     def _close_ws(self) -> None:
         """Close the WebSocket connection if open."""

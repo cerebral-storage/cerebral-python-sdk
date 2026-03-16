@@ -11,6 +11,7 @@ import pytest
 from tilde._output_stream import OutputStream
 from tilde.exceptions import CommandError, SandboxError
 from tilde.models import RunResult
+from tilde.resources.shell import _FRAME_STDIN, _FRAME_STDOUT
 
 BASE_PATH = "/organizations/test-org/repositories/test-repo/sandboxes"
 
@@ -33,6 +34,61 @@ def _create_sandbox_route(mock_api, sandbox_id="sbx-shell"):
     return mock_api.post(BASE_PATH).mock(
         return_value=httpx.Response(201, json={"sandbox_id": sandbox_id})
     )
+
+
+def _stdout_frame(text: str) -> bytes:
+    """Build a server→client stdout binary frame (0x01 prefix)."""
+    return bytes([_FRAME_STDOUT]) + text.encode("utf-8")
+
+
+def _extract_stdin(mock_ws) -> str:
+    """Extract the last stdin payload sent via the binary protocol."""
+    raw = mock_ws.send.call_args_list[-1][0][0]
+    assert isinstance(raw, bytes)
+    assert raw[0] == _FRAME_STDIN
+    return raw[1:].decode("utf-8")
+
+
+def _make_ws_recv(mock_ws, cmd_output=None, exit_code=0):
+    """Create a recv side_effect that handles the ready probe and optionally a run() call.
+
+    The ready probe (with ``stty`` + ``echo``) is sent during ``__enter__``.
+    After the ready marker is found, a drain phase reads with short timeout —
+    the side_effect raises ``TimeoutError`` for those calls to terminate the drain.
+    If *cmd_output* is not None, the next recv handles the run() markers.
+    """
+    ready_found = {"done": False}
+
+    def recv_side_effect(timeout=None):
+        sent_raw = mock_ws.send.call_args_list[-1][0][0]
+        assert isinstance(sent_raw, bytes) and sent_raw[0] == _FRAME_STDIN
+        sent = sent_raw[1:].decode("utf-8")
+
+        # Handle ready probe (stty + echo)
+        if "__TILDE_READY_" in sent and not ready_found["done"]:
+            ready_found["done"] = True
+            start = sent.index("__TILDE_READY_")
+            end = sent.index("__", start + len("__TILDE_READY_")) + 2
+            marker = sent[start:end]
+            return _stdout_frame(f"$ {sent}{marker}\r\n")
+
+        # Drain phase — short timeout calls after the ready marker
+        if ready_found["done"] and "__TILDE_BEGIN_" not in sent:
+            raise TimeoutError
+
+        # Handle run() command markers
+        if "__TILDE_BEGIN_" in sent:
+            begin_idx = sent.index("__TILDE_BEGIN_") + len("__TILDE_BEGIN_")
+            end_idx = sent.index("__", begin_idx)
+            marker = sent[begin_idx:end_idx]
+            begin_m = f"__TILDE_BEGIN_{marker}__"
+            end_m = f"__TILDE_END_{marker}__"
+            output = cmd_output if cmd_output is not None else ""
+            return _stdout_frame(f"{output}\r\n{begin_m}\r\n{exit_code}\r\n{end_m}\r\n")
+
+        return _stdout_frame("")
+
+    return recv_side_effect
 
 
 class TestShellRun:
@@ -66,29 +122,7 @@ class TestShellRun:
 
         mock_ws = MagicMock()
         mock_ws_connect.return_value = mock_ws
-
-        # Simulate WebSocket recv: the shell echoes back the command and markers
-        def make_recv(cmd_output, exit_code=0):
-            marker_holder = {}
-
-            def recv_side_effect(timeout=None):
-                # First call returns the full output with markers
-                if "marker" not in marker_holder:
-                    # We need to extract the marker from the sent command
-                    sent = mock_ws.send.call_args_list[-1][0][0]
-                    # Parse marker from the sent wrapped command
-                    begin_idx = sent.index("__TILDE_BEGIN_") + len("__TILDE_BEGIN_")
-                    end_idx = sent.index("__", begin_idx)
-                    marker = sent[begin_idx:end_idx]
-                    marker_holder["marker"] = marker
-                    begin_m = f"__TILDE_BEGIN_{marker}__"
-                    end_m = f"__TILDE_END_{marker}__"
-                    return f"{cmd_output}\n{begin_m}\n{exit_code}\n{end_m}\n"
-                return ""
-
-            return recv_side_effect
-
-        mock_ws.recv.side_effect = make_recv("hello world")
+        mock_ws.recv.side_effect = _make_ws_recv(mock_ws, "hello world")
 
         with repo.shell(image="alpine:latest") as sh:
             result = sh.run("echo hello world")
@@ -97,6 +131,46 @@ class TestShellRun:
         assert result.exit_code == 0
         assert isinstance(result.stdout, OutputStream)
         assert "hello world" in result.stdout.text()
+
+    @patch("tilde.resources.shell.ws_connect")
+    def test_sends_binary_stdin_frames(self, mock_ws_connect, mock_api, repo):
+        """All sends use binary frames with 0x00 stdin prefix."""
+        _create_sandbox_route(mock_api, "sbx-bin")
+        mock_api.get(f"{BASE_PATH}/sbx-bin/status").mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "status": "running",
+                        "exit_code": None,
+                        "commit_id": "",
+                        "web_url": "",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "status": "committed",
+                        "exit_code": 0,
+                        "commit_id": "c-bin",
+                        "web_url": "",
+                    },
+                ),
+            ]
+        )
+
+        mock_ws = MagicMock()
+        mock_ws_connect.return_value = mock_ws
+        mock_ws.recv.side_effect = _make_ws_recv(mock_ws, "ok")
+
+        with repo.shell(image="alpine:latest") as sh:
+            sh.run("echo ok")
+
+        # Every send call should be bytes starting with 0x00
+        for call in mock_ws.send.call_args_list:
+            data = call[0][0]
+            assert isinstance(data, bytes), f"Expected bytes, got {type(data)}"
+            assert data[0] == _FRAME_STDIN, f"Expected stdin prefix 0x00, got 0x{data[0]:02x}"
 
     @patch("tilde.resources.shell.ws_connect")
     def test_run_check_raises_on_nonzero(self, mock_ws_connect, mock_api, repo):
@@ -127,17 +201,7 @@ class TestShellRun:
 
         mock_ws = MagicMock()
         mock_ws_connect.return_value = mock_ws
-
-        def recv_side_effect(timeout=None):
-            sent = mock_ws.send.call_args_list[-1][0][0]
-            begin_idx = sent.index("__TILDE_BEGIN_") + len("__TILDE_BEGIN_")
-            end_idx = sent.index("__", begin_idx)
-            marker = sent[begin_idx:end_idx]
-            begin_m = f"__TILDE_BEGIN_{marker}__"
-            end_m = f"__TILDE_END_{marker}__"
-            return f"error output\n{begin_m}\n1\n{end_m}\n"
-
-        mock_ws.recv.side_effect = recv_side_effect
+        mock_ws.recv.side_effect = _make_ws_recv(mock_ws, "error output", exit_code=1)
 
         with repo.shell(image="alpine:latest") as sh:
             with pytest.raises(CommandError) as exc_info:
@@ -174,19 +238,51 @@ class TestShellRun:
 
         mock_ws = MagicMock()
         mock_ws_connect.return_value = mock_ws
-
-        def recv_side_effect(timeout=None):
-            sent = mock_ws.send.call_args_list[-1][0][0]
-            begin_idx = sent.index("__TILDE_BEGIN_") + len("__TILDE_BEGIN_")
-            end_idx = sent.index("__", begin_idx)
-            marker = sent[begin_idx:end_idx]
-            return f"\n__TILDE_BEGIN_{marker}__\n42\n__TILDE_END_{marker}__\n"
-
-        mock_ws.recv.side_effect = recv_side_effect
+        mock_ws.recv.side_effect = _make_ws_recv(mock_ws, exit_code=42)
 
         with repo.shell(image="alpine:latest") as sh:
             result = sh.run("exit 42")
         assert result.exit_code == 42
+
+    @patch("tilde.resources.shell.ws_connect")
+    def test_run_strips_ansi_escape_codes(self, mock_ws_connect, mock_api, repo):
+        """run() strips ANSI escape codes from command output."""
+        _create_sandbox_route(mock_api, "sbx-ansi")
+        mock_api.get(f"{BASE_PATH}/sbx-ansi/status").mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "status": "running",
+                        "exit_code": None,
+                        "commit_id": "",
+                        "web_url": "",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "status": "committed",
+                        "exit_code": 0,
+                        "commit_id": "c-ansi",
+                        "web_url": "",
+                    },
+                ),
+            ]
+        )
+
+        mock_ws = MagicMock()
+        mock_ws_connect.return_value = mock_ws
+        # Simulate output with ANSI color codes (e.g. colored ls output)
+        colored_output = "\x1b[1;34mdir1\x1b[0m  \x1b[0;32mfile.txt\x1b[0m"
+        mock_ws.recv.side_effect = _make_ws_recv(mock_ws, colored_output)
+
+        with repo.shell(image="alpine:latest") as sh:
+            result = sh.run("ls --color=always")
+
+        assert "\x1b" not in result.stdout.text()
+        assert "dir1" in result.stdout.text()
+        assert "file.txt" in result.stdout.text()
 
 
 class TestShellContextManager:
@@ -211,6 +307,7 @@ class TestShellContextManager:
 
         mock_ws = MagicMock()
         mock_ws_connect.return_value = mock_ws
+        mock_ws.recv.side_effect = _make_ws_recv(mock_ws)
 
         with pytest.raises(ValueError, match="test error"), repo.shell(image="alpine:latest"):
             raise ValueError("test error")
@@ -246,6 +343,7 @@ class TestShellContextManager:
 
         mock_ws = MagicMock()
         mock_ws_connect.return_value = mock_ws
+        mock_ws.recv.side_effect = _make_ws_recv(mock_ws)
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -312,6 +410,7 @@ class TestShellDefaultImage:
 
         mock_ws = MagicMock()
         mock_ws_connect.return_value = mock_ws
+        mock_ws.recv.side_effect = _make_ws_recv(mock_ws)
 
         with r.shell():
             pass
