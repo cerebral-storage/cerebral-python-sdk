@@ -14,8 +14,12 @@ from tilde.models import RunResult
 BASE_PATH = "/organizations/test-org/repositories/test-repo/sandboxes"
 
 
-def _setup_sandbox(mock_api, sandbox_id, status, exit_code=0, stdout="", stderr=""):
-    """Set up mock routes for a non-interactive sandbox lifecycle."""
+def _setup_sandbox(mock_api, sandbox_id, status, exit_code=0, stdout=""):
+    """Set up mock routes for a non-interactive sandbox lifecycle.
+
+    ``stdout`` is the merged stdout+stderr stream returned from
+    ``/logs/stdout`` — the server no longer exposes separate streams.
+    """
     mock_api.post(BASE_PATH).mock(return_value=httpx.Response(201, json={"sandbox_id": sandbox_id}))
     mock_api.get(f"{BASE_PATH}/{sandbox_id}/status").mock(
         return_value=httpx.Response(
@@ -29,11 +33,8 @@ def _setup_sandbox(mock_api, sandbox_id, status, exit_code=0, stdout="", stderr=
             },
         )
     )
-    mock_api.get(f"{BASE_PATH}/{sandbox_id}/stdout").mock(
+    mock_api.get(f"{BASE_PATH}/{sandbox_id}/logs/stdout").mock(
         return_value=httpx.Response(200, text=stdout, headers={"content-type": "text/plain"})
-    )
-    mock_api.get(f"{BASE_PATH}/{sandbox_id}/stderr").mock(
-        return_value=httpx.Response(200, text=stderr, headers={"content-type": "text/plain"})
     )
 
 
@@ -68,25 +69,25 @@ class TestExecuteBasic:
         assert payload["command"] == ["python", "-c", "print('ok')"]
         assert result.exit_code == 0
 
-    def test_captures_stderr(self, mock_api, repo):
-        """execute() captures stderr output."""
+    def test_merged_output(self, mock_api, repo):
+        """execute() returns merged stdout+stderr on result.stdout."""
         _setup_sandbox(
             mock_api,
             "sbx-err",
             "committed",
             exit_code=0,
-            stdout="",
-            stderr="warning: something\n",
+            stdout="line 1\nwarning: something\n",
         )
 
         result = repo.execute("cmd", check=False)
-        assert "warning: something" in result.stderr.text()
+        assert "warning: something" in result.stdout.text()
+        assert "line 1" in result.stdout.text()
 
 
 class TestExecuteCheck:
     def test_check_true_raises_on_failure(self, mock_api, repo):
         """check=True raises CommandError on non-zero exit."""
-        _setup_sandbox(mock_api, "sbx-chk", "failed", exit_code=1, stderr="error\n")
+        _setup_sandbox(mock_api, "sbx-chk", "failed", exit_code=1, stdout="error\n")
 
         with pytest.raises(CommandError) as exc_info:
             repo.execute("bad_cmd")
@@ -147,17 +148,16 @@ class TestExecuteDefaultImage:
 
 class TestExecuteFailedSandbox:
     def test_failed_sandbox_reads_output(self, mock_api, repo):
-        """Even when sandbox fails, stdout/stderr are captured."""
+        """Even when sandbox fails, merged output is captured."""
         _setup_sandbox(
             mock_api,
             "sbx-fout",
             "failed",
             exit_code=127,
-            stdout="partial output\n",
-            stderr="command not found\n",
+            stdout="partial output\ncommand not found\n",
         )
 
         result = repo.execute("nonexistent", check=False)
         assert result.exit_code == 127
         assert "partial output" in result.stdout.text()
-        assert "command not found" in result.stderr.text()
+        assert "command not found" in result.stdout.text()

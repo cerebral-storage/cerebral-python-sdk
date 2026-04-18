@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class LogStream:
-    """Streaming line iterator for sandbox stdout/stderr.
+    """Streaming line iterator for sandbox output logs.
 
     Use as a context manager::
 
@@ -68,6 +68,7 @@ class SandboxStatus:
         self.exit_code: int | None = data.get("exit_code")
         self.commit_id: str = data.get("commit_id", "")
         self.web_url: str = data.get("web_url", "")
+        self.error_message: str = data.get("error_message", "")
 
     def __repr__(self) -> str:
         parts = [f"state='{self.state}'"]
@@ -77,15 +78,26 @@ class SandboxStatus:
             parts.append(f"commit_id='{self.commit_id}'")
         if self.web_url:
             parts.append(f"web_url='{self.web_url}'")
+        if self.error_message:
+            parts.append(f"error_message='{self.error_message}'")
         return f"SandboxStatus({', '.join(parts)})"
 
     def stdout(self) -> LogStream:
-        """Stream sandbox stdout."""
-        return LogStream(self._client, f"{self._base_path}/stdout")
+        """Stream merged sandbox stdout and stderr.
 
-    def stderr(self) -> LogStream:
-        """Stream sandbox stderr."""
-        return LogStream(self._client, f"{self._base_path}/stderr")
+        The server interleaves both streams in the order the sandbox
+        produced them; there is no separate stderr endpoint.
+        """
+        return LogStream(self._client, f"{self._base_path}/logs/stdout")
+
+    def network(self) -> LogStream:
+        """Stream sandbox outbound network request logs (NDJSON).
+
+        Each line is a JSON object describing one outbound HTTP request
+        made by the sandbox, including the proxy decision and upstream
+        response metadata.
+        """
+        return LogStream(self._client, f"{self._base_path}/logs/network")
 
 
 class SandboxResource:

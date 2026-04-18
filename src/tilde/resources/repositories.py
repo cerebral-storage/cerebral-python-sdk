@@ -387,17 +387,11 @@ class Repository:
         else:
             raise SandboxError(f"Sandbox {sandbox.id} did not finish within {poll_timeout}s")
 
-        # Read stdout and stderr
+        # Read merged stdout+stderr output
         stdout_bytes = b""
-        stderr_bytes = b""
         try:
-            with self._client._stream("GET", f"{sandbox._base_path}/stdout") as resp:
+            with self._client._stream("GET", f"{sandbox._base_path}/logs/stdout") as resp:
                 stdout_bytes = resp.read()
-        except Exception:
-            pass
-        try:
-            with self._client._stream("GET", f"{sandbox._base_path}/stderr") as resp:
-                stderr_bytes = resp.read()
         except Exception:
             pass
 
@@ -405,7 +399,6 @@ class Repository:
         result = RunResult(
             stdout=OutputStream(stdout_bytes),
             exit_code=exit_code,
-            stderr=OutputStream(stderr_bytes),
         )
 
         if check and exit_code != 0:

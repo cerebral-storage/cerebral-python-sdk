@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, field, fields
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from tilde._output_stream import OutputStream
+if TYPE_CHECKING:
+    from tilde._output_stream import OutputStream
 
 _T = TypeVar("_T")
 
@@ -909,11 +910,14 @@ class SandboxTriggerData:
 @_compact_repr
 @dataclass(slots=True)
 class RunResult:
-    """Result of a command execution in a sandbox."""
+    """Result of a command execution in a sandbox.
+
+    ``stdout`` is the merged stdout and stderr produced by the command,
+    interleaved in the order the sandbox wrote them.
+    """
 
     stdout: OutputStream
     exit_code: int
-    stderr: OutputStream = field(default_factory=lambda: OutputStream(b""))
 
 
 @_compact_repr

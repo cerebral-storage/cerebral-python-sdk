@@ -96,7 +96,8 @@ class Shell:
                 on non-zero exit code.
 
         Returns:
-            A :class:`~tilde.models.RunResult` with stdout, stderr, and exit_code.
+            A :class:`~tilde.models.RunResult` whose ``stdout`` holds the
+            merged stdout+stderr output along with the command's exit code.
         """
         if self._ws is None:
             raise SandboxError("Shell is not connected")

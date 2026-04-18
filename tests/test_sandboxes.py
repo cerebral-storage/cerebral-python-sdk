@@ -213,6 +213,29 @@ class TestSandboxStatus:
         assert status.state == "awaiting_approval"
         assert status.web_url == "https://app.tilde.run/approve/sbx-approve"
 
+    def test_status_failed_has_error_message(self, mock_api, repo):
+        """Failed sandboxes expose error_message."""
+        mock_api.post(BASE_PATH).mock(
+            return_value=httpx.Response(201, json={"sandbox_id": "sbx-fail"})
+        )
+        mock_api.get(f"{BASE_PATH}/sbx-fail/status").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "status": "failed",
+                    "status_reason": "internal_error",
+                    "exit_code": None,
+                    "commit_id": "",
+                    "web_url": "",
+                    "error_message": "pod terminated unexpectedly",
+                },
+            )
+        )
+        sandbox = repo.sandbox(image="python-310")
+        status = sandbox.status()
+        assert status.state == "failed"
+        assert status.error_message == "pod terminated unexpectedly"
+
 
 class TestSandboxCancel:
     def test_cancel(self, mock_api, repo):
@@ -245,12 +268,12 @@ class TestSandboxLogStreams:
         stream = status.stdout()
         assert isinstance(stream, LogStream)
 
-    def test_stderr_returns_log_stream(self, mock_api, repo):
-        """status.stderr() returns a LogStream."""
+    def test_network_returns_log_stream(self, mock_api, repo):
+        """status.network() returns a LogStream."""
         mock_api.post(BASE_PATH).mock(
-            return_value=httpx.Response(201, json={"sandbox_id": "sbx-log2"})
+            return_value=httpx.Response(201, json={"sandbox_id": "sbx-net"})
         )
-        mock_api.get(f"{BASE_PATH}/sbx-log2/status").mock(
+        mock_api.get(f"{BASE_PATH}/sbx-net/status").mock(
             return_value=httpx.Response(
                 200,
                 json={"status": "running", "exit_code": None, "commit_id": "", "web_url": ""},
@@ -258,11 +281,11 @@ class TestSandboxLogStreams:
         )
         sandbox = repo.sandbox(image="python-310")
         status = sandbox.status()
-        stream = status.stderr()
+        stream = status.network()
         assert isinstance(stream, LogStream)
 
     def test_stdout_stream_lines(self, mock_api, repo):
-        """LogStream yields lines from the streaming response."""
+        """LogStream yields merged stdout+stderr lines from the streaming response."""
         mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-stream"})
         )
@@ -272,10 +295,10 @@ class TestSandboxLogStreams:
                 json={"status": "running", "exit_code": None, "commit_id": "", "web_url": ""},
             )
         )
-        mock_api.get(f"{BASE_PATH}/sbx-stream/stdout").mock(
+        mock_api.get(f"{BASE_PATH}/sbx-stream/logs/stdout").mock(
             return_value=httpx.Response(
                 200,
-                text="line 1\nline 2\nline 3\n",
+                text="line 1\nerror: boom\nline 3\n",
                 headers={"content-type": "text/plain"},
             )
         )
@@ -283,31 +306,34 @@ class TestSandboxLogStreams:
         status = sandbox.status()
         with status.stdout() as stream:
             lines = list(stream)
-        assert lines == ["line 1", "line 2", "line 3"]
+        assert lines == ["line 1", "error: boom", "line 3"]
 
-    def test_stderr_stream_lines(self, mock_api, repo):
-        """LogStream yields stderr lines from the streaming response."""
+    def test_network_stream_lines(self, mock_api, repo):
+        """LogStream yields NDJSON lines from the network log endpoint."""
         mock_api.post(BASE_PATH).mock(
-            return_value=httpx.Response(201, json={"sandbox_id": "sbx-err"})
+            return_value=httpx.Response(201, json={"sandbox_id": "sbx-netlog"})
         )
-        mock_api.get(f"{BASE_PATH}/sbx-err/status").mock(
+        mock_api.get(f"{BASE_PATH}/sbx-netlog/status").mock(
             return_value=httpx.Response(
                 200,
-                json={"status": "failed", "exit_code": 1, "commit_id": "", "web_url": ""},
+                json={"status": "running", "exit_code": None, "commit_id": "", "web_url": ""},
             )
         )
-        mock_api.get(f"{BASE_PATH}/sbx-err/stderr").mock(
+        mock_api.get(f"{BASE_PATH}/sbx-netlog/logs/network").mock(
             return_value=httpx.Response(
                 200,
-                text="error: something went wrong\n",
-                headers={"content-type": "text/plain"},
+                text='{"decision":"allow","url":"https://a"}\n{"decision":"deny","url":"https://b"}\n',
+                headers={"content-type": "application/x-ndjson"},
             )
         )
         sandbox = repo.sandbox(image="python-310")
         status = sandbox.status()
-        with status.stderr() as stream:
+        with status.network() as stream:
             lines = list(stream)
-        assert lines == ["error: something went wrong"]
+        assert lines == [
+            '{"decision":"allow","url":"https://a"}',
+            '{"decision":"deny","url":"https://b"}',
+        ]
 
 
 class TestSandboxDataModel:

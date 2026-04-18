@@ -55,13 +55,13 @@ print(result.stdout.text())
 # check=False to handle errors yourself
 result = repo.execute("might-fail", check=False)
 if result.exit_code != 0:
-    print(result.stderr.text())
+    print(result.stdout.text())
 ```
 
 ### Output streams
 
-Both `execute()` and `shell.run()` return a `RunResult` whose `stdout` and
-`stderr` fields are `OutputStream` objects:
+Both `execute()` and `shell.run()` return a `RunResult` whose `stdout`
+holds the merged stdout+stderr stream as an `OutputStream`:
 
 | Method | Returns | Description |
 |--------|---------|-------------|
