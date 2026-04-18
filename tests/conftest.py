@@ -1,9 +1,20 @@
 import pytest
 import respx
 
+from tilde import _config
 from tilde.client import Client
 
 BASE_URL = "https://tilde.run/api/v1"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tilde_config_file(tmp_path, monkeypatch):
+    """Isolate ~/.tilde/config.yaml for every test.
+
+    Without this, tests that exercise default config resolution would pick up
+    a real config file on the developer's machine and behave unpredictably.
+    """
+    monkeypatch.setattr(_config, "_default_config_path", lambda: tmp_path / "config.yaml")
 
 
 @pytest.fixture

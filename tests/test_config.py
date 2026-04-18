@@ -1,8 +1,17 @@
 """Tests for the tilde._config module."""
 
+from pathlib import Path
+
 from tilde._config import resolve_config
 
 DEFAULT_ENDPOINT = "https://tilde.run"
+
+# Note: the ~/.tilde/config.yaml path is redirected to tmp_path by an autouse
+# fixture in tests/conftest.py.
+
+
+def _write_config(tmp_path: Path, content: str) -> None:
+    (tmp_path / "config.yaml").write_text(content, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +83,106 @@ class TestExplicitParamResolution:
         )
         assert cfg.api_key == "my-key"
         assert cfg.endpoint_url == "https://my.endpoint.io"
+
+
+# ---------------------------------------------------------------------------
+# File-based resolution (~/.tilde/config.yaml, written by the tilde CLI)
+# ---------------------------------------------------------------------------
+
+
+class TestFileResolution:
+    """``~/.tilde/config.yaml`` is consulted after explicit params and env
+    vars, and before defaults."""
+
+    def test_api_key_from_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(tmp_path, "api_key: tuk-fromfile\n")
+        cfg = resolve_config()
+        assert cfg.api_key == "tuk-fromfile"
+
+    def test_endpoint_url_from_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(tmp_path, "endpoint_url: https://file.endpoint.io\n")
+        cfg = resolve_config()
+        assert cfg.endpoint_url == "https://file.endpoint.io"
+
+    def test_env_overrides_file_api_key(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TILDE_API_KEY", "env-wins")
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(tmp_path, "api_key: tuk-fromfile\n")
+        cfg = resolve_config()
+        assert cfg.api_key == "env-wins"
+
+    def test_env_overrides_file_endpoint_url(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.setenv("TILDE_ENDPOINT_URL", "https://env.wins")
+        _write_config(tmp_path, "endpoint_url: https://file.loses\n")
+        cfg = resolve_config()
+        assert cfg.endpoint_url == "https://env.wins"
+
+    def test_explicit_overrides_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(
+            tmp_path,
+            "api_key: tuk-fromfile\nendpoint_url: https://file.endpoint.io\n",
+        )
+        cfg = resolve_config(api_key="explicit", endpoint_url="https://explicit")
+        assert cfg.api_key == "explicit"
+        assert cfg.endpoint_url == "https://explicit"
+
+    def test_file_with_both_keys(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(
+            tmp_path,
+            "api_key: tuk-123\nendpoint_url: https://file.io\n",
+        )
+        cfg = resolve_config()
+        assert cfg.api_key == "tuk-123"
+        assert cfg.endpoint_url == "https://file.io"
+
+    def test_missing_file_is_silently_ignored(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        # tmp_path is empty — no config.yaml.
+        cfg = resolve_config()
+        assert cfg.api_key is None
+        assert cfg.endpoint_url == DEFAULT_ENDPOINT
+
+    def test_malformed_file_is_silently_ignored(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(tmp_path, "api_key: [unterminated\n")
+        cfg = resolve_config()
+        assert cfg.api_key is None
+        assert cfg.endpoint_url == DEFAULT_ENDPOINT
+
+    def test_empty_file_is_silently_ignored(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(tmp_path, "")
+        cfg = resolve_config()
+        assert cfg.api_key is None
+
+    def test_non_mapping_file_is_silently_ignored(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(tmp_path, "- just\n- a\n- list\n")
+        cfg = resolve_config()
+        assert cfg.api_key is None
+
+    def test_unknown_keys_are_ignored(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
+        _write_config(
+            tmp_path,
+            "api_key: tuk-ok\nfuture_key: something\n",
+        )
+        cfg = resolve_config()
+        assert cfg.api_key == "tuk-ok"
 
 
 # ---------------------------------------------------------------------------
