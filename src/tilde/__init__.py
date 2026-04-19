@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tilde._credentials import SandboxCredentials, SandboxCredentialsProvider
 from tilde._output_stream import OutputStream
 from tilde._version import __version__
 from tilde.client import Client
@@ -124,6 +125,8 @@ __all__ = [
     "RepositoryWithOrg",
     "Role",
     "RunResult",
+    "SandboxCredentials",
+    "SandboxCredentialsProvider",
     "SandboxData",
     "SandboxError",
     "SandboxTriggerCondition",
@@ -153,6 +156,7 @@ def configure(
     api_key: str | None = None,
     endpoint_url: str | None = None,
     default_sandbox_image: str | None = None,
+    credentials_provider: SandboxCredentialsProvider | None = None,
 ) -> None:
     """Configure the default client.
 
@@ -166,6 +170,7 @@ def configure(
         api_key=api_key,
         endpoint_url=endpoint_url,
         default_sandbox_image=default_sandbox_image,
+        credentials_provider=credentials_provider,
     )
 
 

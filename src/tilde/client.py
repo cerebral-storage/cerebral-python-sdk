@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from tilde._config import resolve_config
+from tilde._credentials import (
+    ENV_SANDBOX_CREDENTIALS_URI,
+    SandboxCredentialsProvider,
+)
 from tilde._version import __version__
 from tilde.exceptions import (
     ConfigurationError,
@@ -32,6 +37,12 @@ class Client:
         api_key: API key.  Falls back to ``TILDE_API_KEY`` env var.
             May be ``None`` at construction; raises
             :class:`~tilde.exceptions.ConfigurationError` at request time.
+        credentials_provider: Dynamic credentials source (e.g.
+            :class:`~tilde._credentials.SandboxCredentialsProvider`).  When
+            provided, its token is used instead of ``api_key`` for outgoing
+            requests.  If omitted, the client auto-detects
+            ``TILDE_SANDBOX_CREDENTIALS_URI`` (sandbox IMDS) and instantiates
+            a provider on its own unless an explicit ``api_key`` is supplied.
         extra_user_agent: Additional User-Agent segments appended after the
             SDK identifier (e.g. ``"my-app/0.1.0 claude-desktop/1.2"``).
         httpx_client: Optional pre-configured ``httpx.Client`` for testing.
@@ -43,6 +54,7 @@ class Client:
         endpoint_url: str | None = None,
         api_key: str | None = None,
         default_sandbox_image: str | None = None,
+        credentials_provider: SandboxCredentialsProvider | None = None,
         extra_user_agent: str | None = None,
         httpx_client: httpx.Client | None = None,
     ) -> None:
@@ -50,6 +62,11 @@ class Client:
             endpoint_url=endpoint_url,
             api_key=api_key,
             default_sandbox_image=default_sandbox_image,
+        )
+        self._credentials_provider = _resolve_credentials_provider(
+            explicit_provider=credentials_provider,
+            explicit_api_key=api_key,
+            config_api_key=self._config.api_key,
         )
         self._multipart_unsupported = False
         if httpx_client is not None:
@@ -78,6 +95,8 @@ class Client:
     # -- HTTP helpers --------------------------------------------------------
 
     def _ensure_api_key(self) -> str:
+        if self._credentials_provider is not None:
+            return self._credentials_provider.get_token()
         if self._config.api_key is None:
             raise ConfigurationError(
                 "No API key configured. Set TILDE_API_KEY or pass api_key= to Client()."
@@ -221,9 +240,37 @@ class Client:
         """Close the underlying HTTP client."""
         if self._owns_http:
             self._http.close()
+        if self._credentials_provider is not None:
+            self._credentials_provider.close()
 
     def __enter__(self) -> Client:
         return self
 
     def __exit__(self, *args: object) -> None:
         self.close()
+
+
+def _resolve_credentials_provider(
+    *,
+    explicit_provider: SandboxCredentialsProvider | None,
+    explicit_api_key: str | None,
+    config_api_key: str | None,
+) -> SandboxCredentialsProvider | None:
+    """Pick the credentials provider to use for a new client.
+
+    An explicit provider always wins.  An explicit ``api_key`` suppresses
+    auto-detection so callers that deliberately pass a static key are never
+    hijacked by the sandbox IMDS env var.  Otherwise, when
+    ``TILDE_SANDBOX_CREDENTIALS_URI`` is set, a provider is instantiated —
+    this matches the ECS-style convention of preferring the metadata endpoint
+    over any static env/file credentials that happen to also be present.
+    """
+    if explicit_provider is not None:
+        return explicit_provider
+    if explicit_api_key is not None:
+        return None
+    uri = os.environ.get(ENV_SANDBOX_CREDENTIALS_URI)
+    if uri:
+        return SandboxCredentialsProvider(uri)
+    _ = config_api_key
+    return None

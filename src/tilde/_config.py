@@ -14,6 +14,9 @@ DEFAULT_SANDBOX_IMAGE = "ubuntu"
 
 _ENV_API_KEY = "TILDE_API_KEY"  # pragma: allowlist secret
 _ENV_ENDPOINT_URL = "TILDE_ENDPOINT_URL"
+# TILDE_API_URL is the endpoint URL injected by the sandbox metadata stack,
+# following the same ECS-style convention as TILDE_SANDBOX_CREDENTIALS_URI.
+_ENV_API_URL = "TILDE_API_URL"
 _ENV_DEFAULT_SANDBOX_IMAGE = "TILDE_DEFAULT_SANDBOX_IMAGE"
 
 _CONFIG_FILE_KEY_API_KEY = "api_key"  # pragma: allowlist secret
@@ -86,6 +89,7 @@ def resolve_config(
         endpoint_url=(
             endpoint_url
             or os.environ.get(_ENV_ENDPOINT_URL)
+            or os.environ.get(_ENV_API_URL)
             or file_cfg.get(_CONFIG_FILE_KEY_ENDPOINT_URL)
             or DEFAULT_ENDPOINT_URL
         ),
