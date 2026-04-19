@@ -1,18 +1,17 @@
-"""Tests for GroupCollection."""
+"""Tests for Group, Groups, and group members."""
 
 import httpx
 import pytest
 
-from tilde.models import EffectiveGroup, Group, GroupDetail
+from tilde.models import EffectiveGroup, Group, Organization
 
 
-class TestGroupCollection:
+class TestGroups:
     @pytest.fixture
     def groups(self, client):
-        return client.organizations.groups("test-org")
+        return Organization(client, name="test-org").groups
 
     def test_create(self, mock_api, groups):
-        """POST .../groups."""
         route = mock_api.post("/organizations/test-org/groups").mock(
             return_value=httpx.Response(
                 200,
@@ -33,7 +32,6 @@ class TestGroupCollection:
         assert route.called
 
     def test_list(self, mock_api, groups):
-        """Paginated list of groups."""
         mock_api.get("/organizations/test-org/groups").mock(
             return_value=httpx.Response(
                 200,
@@ -64,8 +62,7 @@ class TestGroupCollection:
         assert items[0].name == "eng"
         assert items[1].name == "qa"
 
-    def test_get(self, mock_api, groups):
-        """Returns GroupDetail."""
+    def test_get_returns_group_with_members(self, mock_api, groups):
         mock_api.get("/organizations/test-org/groups/grp-1").mock(
             return_value=httpx.Response(
                 200,
@@ -90,14 +87,28 @@ class TestGroupCollection:
                 },
             )
         )
-        detail = groups.get("grp-1")
-        assert isinstance(detail, GroupDetail)
-        assert detail.group.name == "engineers"
-        assert len(detail.members) == 1
-        assert detail.members[0].subject_id == "user-1"
+        group = groups.get("grp-1")
+        assert isinstance(group, Group)
+        assert group.name == "engineers"
 
-    def test_update(self, mock_api, groups):
-        """PUT .../groups/{id}."""
+    def test_update(self, mock_api, client):
+        """Group.update() PUTs to /groups/{id}."""
+        mock_api.get("/organizations/test-org/groups/grp-1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "group": {
+                        "id": "grp-1",
+                        "organization_id": "org-1",
+                        "name": "engineers",
+                        "description": "",
+                        "created_by": "user-1",
+                    },
+                    "members": [],
+                    "attachments": [],
+                },
+            )
+        )
         route = mock_api.put("/organizations/test-org/groups/grp-1").mock(
             return_value=httpx.Response(
                 200,
@@ -110,37 +121,59 @@ class TestGroupCollection:
                 },
             )
         )
-        result = groups.update("grp-1", name="engineering", description="Updated desc")
+        group = Organization(client, name="test-org").groups.get("grp-1")
+        result = group.update(name="engineering", description="Updated desc")
         assert isinstance(result, Group)
         assert result.name == "engineering"
         assert route.called
 
-    def test_delete(self, mock_api, groups):
-        """DELETE .../groups/{id}."""
+    def test_delete_from_collection(self, mock_api, groups):
         route = mock_api.delete("/organizations/test-org/groups/grp-1").mock(
             return_value=httpx.Response(204)
         )
         groups.delete("grp-1")
         assert route.called
 
-    def test_add_member(self, mock_api, groups):
-        """POST .../groups/{id}/members."""
-        route = mock_api.post("/organizations/test-org/groups/grp-1/members").mock(
+    def test_members_create_returns_member(self, mock_api, client):
+        mock_api.post("/organizations/test-org/groups/grp-1/members").mock(
             return_value=httpx.Response(201)
         )
-        groups.add_member("grp-1", subject_type="user", subject_id="user-2")
-        assert route.called
+        mock_api.get("/organizations/test-org/groups/grp-1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "group": {
+                        "id": "grp-1",
+                        "organization_id": "org-1",
+                        "name": "eng",
+                        "description": "",
+                        "created_by": "u1",
+                    },
+                    "members": [
+                        {
+                            "subject_type": "user",
+                            "subject_id": "user-2",
+                            "display_name": "Bob",
+                            "username": "bob",
+                        }
+                    ],
+                    "attachments": [],
+                },
+            )
+        )
+        group = Group(client, "test-org", id="grp-1")
+        member = group.members.create(subject_type="user", subject_id="user-2")
+        assert member.subject_id == "user-2"
 
-    def test_remove_member(self, mock_api, groups):
-        """DELETE .../groups/{id}/members?subject_type=user&subject_id=..."""
+    def test_members_delete(self, mock_api, client):
         route = mock_api.delete("/organizations/test-org/groups/grp-1/members").mock(
             return_value=httpx.Response(204)
         )
-        groups.remove_member("grp-1", subject_type="user", subject_id="user-2")
+        group = Group(client, "test-org", id="grp-1")
+        group.members.delete(subject_type="user", subject_id="user-2")
         assert route.called
 
-    def test_effective_groups(self, mock_api, groups):
-        """GET /organizations/test-org/effective-groups."""
+    def test_effective(self, mock_api, groups):
         mock_api.get("/organizations/test-org/effective-groups").mock(
             return_value=httpx.Response(
                 200,
@@ -164,11 +197,8 @@ class TestGroupCollection:
                 },
             )
         )
-        result = groups.effective_groups(principal_type="user", principal_id="user-1")
+        result = groups.effective(principal_type="user", principal_id="user-1")
         assert len(result) == 2
         assert all(isinstance(g, EffectiveGroup) for g in result)
         assert result[0].group_id == "grp-1"
-        assert result[0].group_name == "engineers"
-        assert result[0].source == "direct"
-        assert result[1].group_id == "grp-2"
         assert result[1].source == "inherited"

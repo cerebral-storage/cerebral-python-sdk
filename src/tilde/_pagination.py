@@ -28,18 +28,28 @@ class PaginatedIterator(Iterator[T]):
     for each subsequent page.
     """
 
-    def __init__(self, fetch_page: Callable[[str | None], PageResult[T]]) -> None:
+    def __init__(
+        self,
+        fetch_page: Callable[[str | None], PageResult[T]],
+        *,
+        limit: int | None = None,
+    ) -> None:
         self._fetch_page = fetch_page
         self._buffer: list[T] = []
         self._next_offset: str | None = None
         self._exhausted = False
         self._first_request = True
+        self._limit = limit
+        self._emitted = 0
 
     def __iter__(self) -> PaginatedIterator[T]:
         return self
 
     def __next__(self) -> T:
+        if self._limit is not None and self._emitted >= self._limit:
+            raise StopIteration
         if self._buffer:
+            self._emitted += 1
             return self._buffer.pop(0)
         if self._exhausted:
             raise StopIteration
@@ -51,4 +61,5 @@ class PaginatedIterator(Iterator[T]):
             self._exhausted = True
         if not self._buffer:
             raise StopIteration
+        self._emitted += 1
         return self._buffer.pop(0)

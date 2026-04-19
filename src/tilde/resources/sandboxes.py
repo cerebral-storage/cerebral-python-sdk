@@ -1,4 +1,4 @@
-"""Sandbox resource for running containers against repository data."""
+"""Sandbox entity and Sandboxes collection."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any
 from tilde._pagination import DEFAULT_PAGE_SIZE, PageResult, PaginatedIterator
 
 if TYPE_CHECKING:
+    import builtins
     from collections.abc import Iterator
 
-if TYPE_CHECKING:
     import httpx
 
     from tilde.client import Client
@@ -25,14 +25,14 @@ class LogStream:
                 print(line)
     """
 
-    def __repr__(self) -> str:
-        return f"LogStream(path='{self._path}')"
-
     def __init__(self, client: Client, path: str) -> None:
         self._client = client
         self._path = path
         self._cm: Any = None
         self._response: httpx.Response | None = None
+
+    def __repr__(self) -> str:
+        return f"LogStream(path={self._path!r})"
 
     def __enter__(self) -> LogStream:
         self._cm = self._client._stream("GET", self._path)
@@ -50,10 +50,7 @@ class LogStream:
 
 
 class SandboxStatus:
-    """Status snapshot of a sandbox with streaming log access.
-
-    Returned by :meth:`SandboxResource.status`.
-    """
+    """Status snapshot of a sandbox with streaming log access."""
 
     def __init__(
         self,
@@ -71,94 +68,149 @@ class SandboxStatus:
         self.error_message: str = data.get("error_message", "")
 
     def __repr__(self) -> str:
-        parts = [f"state='{self.state}'"]
+        parts = [f"state={self.state!r}"]
         if self.exit_code is not None:
             parts.append(f"exit_code={self.exit_code}")
         if self.commit_id:
-            parts.append(f"commit_id='{self.commit_id}'")
+            parts.append(f"commit_id={self.commit_id!r}")
         if self.web_url:
-            parts.append(f"web_url='{self.web_url}'")
+            parts.append(f"web_url={self.web_url!r}")
         if self.error_message:
-            parts.append(f"error_message='{self.error_message}'")
+            parts.append(f"error_message={self.error_message!r}")
         return f"SandboxStatus({', '.join(parts)})"
 
     def stdout(self) -> LogStream:
-        """Stream merged sandbox stdout and stderr.
-
-        The server interleaves both streams in the order the sandbox
-        produced them; there is no separate stderr endpoint.
-        """
+        """Stream merged sandbox stdout and stderr."""
         return LogStream(self._client, f"{self._base_path}/logs/stdout")
 
     def network(self) -> LogStream:
-        """Stream sandbox outbound network request logs (NDJSON).
-
-        Each line is a JSON object describing one outbound HTTP request
-        made by the sandbox, including the proxy decision and upstream
-        response metadata.
-        """
+        """Stream sandbox outbound network logs (NDJSON)."""
         return LogStream(self._client, f"{self._base_path}/logs/network")
 
 
-class SandboxResource:
-    """A handle to a single sandbox.
+class Sandbox:
+    """A handle to a single sandbox run."""
 
-    Returned by :meth:`Repository.sandbox` or when iterating
-    :meth:`Repository.sandboxes`.
-    """
-
-    def __init__(self, client: Client, org: str, repo: str, sandbox_id: str) -> None:
+    def __init__(self, client: Client, org: str, repo: str, id: str) -> None:
         self._client = client
         self._org = org
         self._repo = repo
-        self._sandbox_id = sandbox_id
+        self.id = id
 
     def __repr__(self) -> str:
-        return f"SandboxResource(id='{self._sandbox_id}')"
+        return f"Sandbox(id={self.id!r})"
 
     @property
     def _base_path(self) -> str:
-        return f"/organizations/{self._org}/repositories/{self._repo}/sandboxes/{self._sandbox_id}"
+        return f"/organizations/{self._org}/repositories/{self._repo}/sandboxes/{self.id}"
 
-    @property
-    def id(self) -> str:
-        return self._sandbox_id
+    @classmethod
+    def from_dict(cls, client: Client, org: str, repo: str, d: dict[str, Any]) -> Sandbox:
+        return cls(client, org, repo, d.get("id", ""))
 
     def status(self) -> SandboxStatus:
-        """Get the current status of this sandbox."""
         data = self._client._get_json(f"{self._base_path}/status")
         return SandboxStatus(self._client, self._base_path, data)
 
     def cancel(self) -> None:
-        """Cancel a running sandbox."""
         self._client._delete(self._base_path)
 
-    @classmethod
-    def _from_dict(
-        cls,
-        client: Client,
-        org: str,
-        repo: str,
-        d: dict[str, Any],
-    ) -> SandboxResource:
-        return cls(client, org, repo, d.get("id", ""))
+    def delete(self) -> None:
+        """Alias for :meth:`cancel`."""
+        self.cancel()
 
 
-def create_sandbox(
+class Sandboxes:
+    """Sandboxes in a repository."""
+
+    def __init__(self, client: Client, org: str, repo: str) -> None:
+        self._client = client
+        self._org = org
+        self._repo = repo
+
+    def __repr__(self) -> str:
+        return f"Sandboxes({self._org}/{self._repo})"
+
+    @property
+    def _base_path(self) -> str:
+        return f"/organizations/{self._org}/repositories/{self._repo}/sandboxes"
+
+    def list(
+        self,
+        *,
+        after: str | None = None,
+        amount: int | None = None,
+        page_size: int | None = None,
+    ) -> PaginatedIterator[Sandbox]:
+        initial_after = after
+        client = self._client
+        org = self._org
+        repo = self._repo
+        base = self._base_path
+
+        def fetch_page(cursor: str | None) -> PageResult[Sandbox]:
+            params: dict[str, str | int] = {
+                "amount": page_size if page_size is not None else DEFAULT_PAGE_SIZE
+            }
+            effective_after = cursor if cursor is not None else initial_after
+            if effective_after is not None:
+                params["after"] = effective_after
+            data = client._get_json(base, params=params)
+            items = [Sandbox.from_dict(client, org, repo, d) for d in data.get("results", [])]
+            pagination = data.get("pagination", {})
+            return PageResult(
+                items=items,
+                has_more=pagination.get("has_more", False),
+                next_offset=pagination.get("next_offset"),
+                max_per_page=pagination.get("max_per_page"),
+            )
+
+        return PaginatedIterator(fetch_page, limit=amount)
+
+    def get(self, sandbox_id: str) -> Sandbox:
+        return Sandbox(self._client, self._org, self._repo, sandbox_id)
+
+    def create(
+        self,
+        *,
+        image: str,
+        command: builtins.list[str] | None = None,
+        env: dict[str, str] | None = None,
+        mountpoint: str | None = None,
+        path_prefix: str | None = None,
+        timeout_seconds: int | None = None,
+        run_as: dict[str, str] | None = None,
+    ) -> Sandbox:
+        """Create and run a sandbox."""
+        return _create_sandbox(
+            self._client,
+            self._org,
+            self._repo,
+            image=image,
+            command=command,
+            env=env,
+            mountpoint=mountpoint,
+            path_prefix=path_prefix,
+            timeout_seconds=timeout_seconds,
+            run_as=run_as,
+        )
+
+
+def _create_sandbox(
     client: Client,
     org: str,
     repo: str,
     *,
     image: str,
-    command: list[str] | None = None,
+    command: builtins.list[str] | None = None,
     env: dict[str, str] | None = None,
     mountpoint: str | None = None,
     path_prefix: str | None = None,
     timeout_seconds: int | None = None,
     run_as: dict[str, str] | None = None,
     interactive: bool = False,
-) -> SandboxResource:
-    """Create and run a sandbox (called by Repository.sandbox)."""
+) -> Sandbox:
+    """Internal helper shared by ``Sandboxes.create`` and ``Repository.execute``."""
     body: dict[str, Any] = {"image": image}
     if interactive:
         body["interactive"] = True
@@ -176,34 +228,4 @@ def create_sandbox(
         body["run_as"] = run_as
     base = f"/organizations/{org}/repositories/{repo}/sandboxes"
     data = client._post_json(base, json=body)
-    sandbox_id = data["sandbox_id"]
-    return SandboxResource(client, org, repo, sandbox_id)
-
-
-def list_sandboxes(
-    client: Client,
-    org: str,
-    repo: str,
-    *,
-    after: str | None = None,
-) -> PaginatedIterator[SandboxResource]:
-    """List sandboxes in a repository (called by Repository.sandboxes)."""
-    initial_after = after
-    base = f"/organizations/{org}/repositories/{repo}/sandboxes"
-
-    def fetch_page(cursor: str | None) -> PageResult[SandboxResource]:
-        params: dict[str, str | int] = {"amount": DEFAULT_PAGE_SIZE}
-        effective_after = cursor if cursor is not None else initial_after
-        if effective_after is not None:
-            params["after"] = effective_after
-        data = client._get_json(base, params=params)
-        items = [SandboxResource._from_dict(client, org, repo, d) for d in data.get("results", [])]
-        pagination = data.get("pagination", {})
-        return PageResult(
-            items=items,
-            has_more=pagination.get("has_more", False),
-            next_offset=pagination.get("next_offset"),
-            max_per_page=pagination.get("max_per_page"),
-        )
-
-    return PaginatedIterator(fetch_page)
+    return Sandbox(client, org, repo, data["sandbox_id"])

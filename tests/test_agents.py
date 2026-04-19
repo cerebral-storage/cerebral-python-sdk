@@ -1,11 +1,8 @@
-"""Tests for AgentCollection, AgentResource, APIKeyCollection, and OrgResource."""
+"""Tests for Agents, Agent, APIKeys, APIKey, and the Organization chain."""
 
 import httpx
 
-from tilde.models import Agent, APIKey, APIKeyCreated
-from tilde.resources.agents import AgentCollection, AgentResource, APIKeyResource
-from tilde.resources.organizations import OrgResource
-from tilde.resources.repositories import OrgRepositoryCollection
+from tilde.models import Agent, Agents, APIKey, Organization, Repositories, Repository
 
 AGENT_RESPONSE = {
     "id": "agent-1",
@@ -23,16 +20,20 @@ AGENT_RESPONSE = {
 }
 
 
-class TestAgentCollection:
+def _org(client):
+    return Organization(client, name="test-org")
+
+
+class TestAgents:
     def test_create(self, mock_api, client):
         """POST /organizations/test-org/agents."""
         route = mock_api.post("/organizations/test-org/agents").mock(
             return_value=httpx.Response(200, json=AGENT_RESPONSE)
         )
-        agent = client.organization("test-org").agents.create(
+        agent = _org(client).agents.create(
             "my-agent", description="Test agent", metadata={"env": "prod"}
         )
-        assert isinstance(agent, AgentResource)
+        assert isinstance(agent, Agent)
         assert agent.name == "my-agent"
         assert agent.id == "agent-1"
         assert agent.description == "Test agent"
@@ -40,17 +41,15 @@ class TestAgentCollection:
         assert route.called
 
     def test_get(self, mock_api, client):
-        """GET /organizations/test-org/agents/my-agent."""
         mock_api.get("/organizations/test-org/agents/my-agent").mock(
             return_value=httpx.Response(200, json=AGENT_RESPONSE)
         )
-        agent = client.organization("test-org").agents.get("my-agent")
-        assert isinstance(agent, AgentResource)
+        agent = _org(client).agents.get("my-agent")
+        assert isinstance(agent, Agent)
         assert agent.name == "my-agent"
         assert agent.id == "agent-1"
 
     def test_list(self, mock_api, client):
-        """GET /organizations/test-org/agents (paginated)."""
         mock_api.get("/organizations/test-org/agents").mock(
             return_value=httpx.Response(
                 200,
@@ -63,48 +62,50 @@ class TestAgentCollection:
                 },
             )
         )
-        agents = list(client.organization("test-org").agents.list())
+        agents = list(_org(client).agents.list())
         assert len(agents) == 2
         assert all(isinstance(a, Agent) for a in agents)
         assert agents[0].name == "my-agent"
         assert agents[1].name == "other-agent"
 
     def test_update(self, mock_api, client):
-        """PUT /organizations/test-org/agents/my-agent."""
         updated = {**AGENT_RESPONSE, "description": "Updated"}
         route = mock_api.put("/organizations/test-org/agents/my-agent").mock(
             return_value=httpx.Response(200, json=updated)
         )
-        agent = client.organization("test-org").agents.update("my-agent", description="Updated")
-        assert isinstance(agent, AgentResource)
+        agent = _org(client).agents.get.__wrapped__ if False else None  # placeholder
+        # Normal path: fetch agent then call .update()
+        mock_api.get("/organizations/test-org/agents/my-agent").mock(
+            return_value=httpx.Response(200, json=AGENT_RESPONSE)
+        )
+        agent = _org(client).agents.get("my-agent").update(description="Updated")
+        assert isinstance(agent, Agent)
         assert agent.description == "Updated"
         assert route.called
 
     def test_update_inline_policy(self, mock_api, client):
-        """PUT /organizations/test-org/agents/my-agent with inline_policy."""
         updated = {**AGENT_RESPONSE, "inline_policy": "allow read *"}
+        mock_api.get("/organizations/test-org/agents/my-agent").mock(
+            return_value=httpx.Response(200, json=AGENT_RESPONSE)
+        )
         route = mock_api.put("/organizations/test-org/agents/my-agent").mock(
             return_value=httpx.Response(200, json=updated)
         )
-        agent = client.organization("test-org").agents.update(
-            "my-agent", inline_policy="allow read *"
-        )
-        assert isinstance(agent, AgentResource)
+        agent = _org(client).agents.get("my-agent").update(inline_policy="allow read *")
+        assert isinstance(agent, Agent)
         assert agent.inline_policy == "allow read *"
         assert route.called
 
     def test_delete(self, mock_api, client):
-        """DELETE /organizations/test-org/agents/my-agent."""
         route = mock_api.delete("/organizations/test-org/agents/my-agent").mock(
             return_value=httpx.Response(204)
         )
-        client.organization("test-org").agents.delete("my-agent")
+        _org(client).agents.delete("my-agent")
         assert route.called
 
 
-class TestAPIKeyCollection:
+class TestAPIKeys:
     def test_list(self, mock_api, client):
-        """GET /organizations/test-org/agents/my-agent/auth/keys (paginated)."""
         mock_api.get("/organizations/test-org/agents/my-agent/auth/keys").mock(
             return_value=httpx.Response(
                 200,
@@ -124,16 +125,16 @@ class TestAPIKeyCollection:
                 },
             )
         )
-        agent_res = AgentResource(client, "test-org", Agent.from_dict(AGENT_RESPONSE))
-        keys = list(agent_res.api_keys.list())
+        agent = Agent.from_dict(client, "test-org", AGENT_RESPONSE)
+        keys = list(agent.api_keys.list())
         assert len(keys) == 1
         assert isinstance(keys[0], APIKey)
         assert keys[0].id == "key-1"
         assert keys[0].name == "dev-key"
         assert keys[0].token_hint == "cak-...abc"
 
-    def test_create(self, mock_api, client):
-        """POST /organizations/test-org/agents/my-agent/auth/keys."""
+    def test_create_returns_apikey_with_token(self, mock_api, client):
+        """Create surfaces the plaintext token exactly once on the returned APIKey."""
         route = mock_api.post("/organizations/test-org/agents/my-agent/auth/keys").mock(
             return_value=httpx.Response(
                 200,
@@ -142,18 +143,18 @@ class TestAPIKeyCollection:
                     "name": "new-key",
                     "description": "",
                     "token": "cak-full-secret-token",
+                    "token_hint": "cak-...token",
                 },
             )
         )
-        agent_res = AgentResource(client, "test-org", Agent.from_dict(AGENT_RESPONSE))
-        result = agent_res.api_keys.create("new-key")
-        assert isinstance(result, APIKeyCreated)
-        assert result.id == "key-2"
-        assert result.token == "cak-full-secret-token"
+        agent = Agent.from_dict(client, "test-org", AGENT_RESPONSE)
+        key = agent.api_keys.create("new-key")
+        assert isinstance(key, APIKey)
+        assert key.id == "key-2"
+        assert key.token == "cak-full-secret-token"
         assert route.called
 
     def test_get(self, mock_api, client):
-        """GET /organizations/test-org/agents/my-agent/auth/keys/key-1 (by ID)."""
         mock_api.get("/organizations/test-org/agents/my-agent/auth/keys/key-1").mock(
             return_value=httpx.Response(
                 200,
@@ -168,15 +169,14 @@ class TestAPIKeyCollection:
                 },
             )
         )
-        agent_res = AgentResource(client, "test-org", Agent.from_dict(AGENT_RESPONSE))
-        key = agent_res.api_keys.get("key-1")
-        assert isinstance(key, APIKeyResource)
+        agent = Agent.from_dict(client, "test-org", AGENT_RESPONSE)
+        key = agent.api_keys.get("key-1")
+        assert isinstance(key, APIKey)
         assert key.id == "key-1"
         assert key.name == "dev-key"
         assert key.token_hint == "cak-...abc"
 
     def test_revoke(self, mock_api, client):
-        """get() by ID then revoke() DELETEs using that ID."""
         mock_api.get("/organizations/test-org/agents/my-agent/auth/keys/key-1").mock(
             return_value=httpx.Response(
                 200,
@@ -194,26 +194,23 @@ class TestAPIKeyCollection:
         route = mock_api.delete("/organizations/test-org/agents/my-agent/auth/keys/key-1").mock(
             return_value=httpx.Response(204)
         )
-        agent_res = AgentResource(client, "test-org", Agent.from_dict(AGENT_RESPONSE))
-        key = agent_res.api_keys.get("key-1")
+        agent = Agent.from_dict(client, "test-org", AGENT_RESPONSE)
+        key = agent.api_keys.get("key-1")
         key.revoke()
         assert route.called
 
 
-class TestOrgResource:
+class TestOrganizationSubCollections:
     def test_agents_property(self, client):
-        """OrgResource.agents returns AgentCollection."""
-        org = client.organization("test-org")
-        assert isinstance(org, OrgResource)
-        assert isinstance(org.agents, AgentCollection)
+        org = _org(client)
+        assert isinstance(org, Organization)
+        assert isinstance(org.agents, Agents)
 
     def test_repositories_property(self, client):
-        """OrgResource.repositories returns OrgRepositoryCollection."""
-        org = client.organization("test-org")
-        assert isinstance(org.repositories, OrgRepositoryCollection)
+        org = _org(client)
+        assert isinstance(org.repositories, Repositories)
 
     def test_list_repositories(self, mock_api, client):
-        """GET /organizations/test-org/repositories (paginated)."""
         mock_api.get("/organizations/test-org/repositories").mock(
             return_value=httpx.Response(
                 200,
@@ -230,12 +227,12 @@ class TestOrgResource:
                 },
             )
         )
-        repos = list(client.organization("test-org").repositories.list())
+        repos = list(_org(client).repositories.list())
         assert len(repos) == 1
+        assert isinstance(repos[0], Repository)
         assert repos[0].name == "repo-one"
 
-    def test_create_repository(self, mock_api, client):
-        """POST /organizations/test-org/repositories."""
+    def test_create_repository_returns_repository(self, mock_api, client):
         route = mock_api.post("/organizations/test-org/repositories").mock(
             return_value=httpx.Response(
                 201,
@@ -250,12 +247,8 @@ class TestOrgResource:
                 },
             )
         )
-        from tilde.models import RepositoryData
-
-        repo = client.organization("test-org").repositories.create(
-            "my-repo", description="A new repo"
-        )
-        assert isinstance(repo, RepositoryData)
+        repo = _org(client).repositories.create("my-repo", description="A new repo")
+        assert isinstance(repo, Repository)
         assert repo.id == "repo-new"
         assert repo.name == "my-repo"
         assert repo.description == "A new repo"

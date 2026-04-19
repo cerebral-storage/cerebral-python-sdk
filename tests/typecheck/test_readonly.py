@@ -14,6 +14,6 @@ from tilde.resources.commits import Commit
 
 def check_commit_readonly() -> None:
     client = MagicMock()
-    commit = Commit(client, "org", "repo", "abc123")
+    commit = Commit(client, "org", "repo", id="abc123")
     commit.objects.put("path", b"data")  # type: ignore[attr-defined]  # should fail
     commit.objects.delete("path")  # type: ignore[attr-defined]  # should fail

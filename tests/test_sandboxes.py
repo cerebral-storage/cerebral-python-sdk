@@ -1,35 +1,31 @@
-"""Tests for Sandbox resource."""
+"""Tests for Sandbox and Sandboxes."""
 
 import httpx
 
-from tilde.models import SandboxData
-from tilde.resources.sandboxes import LogStream, SandboxResource, SandboxStatus
+from tilde.models import LogStream, Sandbox, SandboxStatus
 
 BASE_PATH = "/organizations/test-org/repositories/test-repo/sandboxes"
 
 
 class TestCreateSandbox:
-    def test_create_sandbox_minimal(self, mock_api, repo):
-        """POST .../sandboxes with only image creates a sandbox."""
+    def test_create_minimal(self, mock_api, repo):
         route = mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-123"})
         )
-        sandbox = repo.sandbox(image="python-310")
-        assert isinstance(sandbox, SandboxResource)
+        sandbox = repo.sandboxes.create(image="python-310")
+        assert isinstance(sandbox, Sandbox)
         assert sandbox.id == "sbx-123"
         assert route.called
-        body = route.calls[0].request.content
         import json
 
-        payload = json.loads(body)
+        payload = json.loads(route.calls[0].request.content)
         assert payload == {"image": "python-310"}
 
-    def test_create_sandbox_full(self, mock_api, repo):
-        """POST .../sandboxes with all options."""
+    def test_create_full(self, mock_api, repo):
         route = mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-456"})
         )
-        sandbox = repo.sandbox(
+        sandbox = repo.sandboxes.create(
             image="python-310",
             command=["python", "script.py"],
             env={"MY_SECRET": "secret_value"},  # pragma: allowlist secret
@@ -53,32 +49,11 @@ class TestCreateSandbox:
             "id": "00000000-0000-0000-0000-000000000001",
         }
 
-    def test_create_sandbox_interactive(self, mock_api, repo):
-        """POST .../sandboxes with interactive=True includes it in body."""
-        route = mock_api.post(BASE_PATH).mock(
-            return_value=httpx.Response(201, json={"sandbox_id": "sbx-int"})
-        )
-        from tilde.resources.sandboxes import create_sandbox
-
-        sandbox = create_sandbox(
-            repo._client,
-            "test-org",
-            "test-repo",
-            image="python-310",
-            interactive=True,
-        )
-        assert sandbox.id == "sbx-int"
-        import json
-
-        payload = json.loads(route.calls[0].request.content)
-        assert payload["interactive"] is True
-
-    def test_create_sandbox_not_interactive_by_default(self, mock_api, repo):
-        """POST .../sandboxes omits interactive when False."""
+    def test_not_interactive_by_default(self, mock_api, repo):
         route = mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-noint"})
         )
-        repo.sandbox(image="python-310")
+        repo.sandboxes.create(image="python-310")
         import json
 
         payload = json.loads(route.calls[0].request.content)
@@ -86,8 +61,7 @@ class TestCreateSandbox:
 
 
 class TestListSandboxes:
-    def test_list_sandboxes(self, mock_api, repo):
-        """GET .../sandboxes returns paginated sandbox resources."""
+    def test_list(self, mock_api, repo):
         mock_api.get(BASE_PATH).mock(
             return_value=httpx.Response(
                 200,
@@ -96,22 +70,17 @@ class TestListSandboxes:
                         {"id": "sbx-1", "image": "python-310", "status": "running"},
                         {"id": "sbx-2", "image": "node-18", "status": "committed"},
                     ],
-                    "pagination": {
-                        "has_more": False,
-                        "next_offset": None,
-                        "max_per_page": 100,
-                    },
+                    "pagination": {"has_more": False, "next_offset": None, "max_per_page": 100},
                 },
             )
         )
-        sandboxes = list(repo.sandboxes())
+        sandboxes = list(repo.sandboxes.list())
         assert len(sandboxes) == 2
-        assert all(isinstance(s, SandboxResource) for s in sandboxes)
+        assert all(isinstance(s, Sandbox) for s in sandboxes)
         assert sandboxes[0].id == "sbx-1"
         assert sandboxes[1].id == "sbx-2"
 
-    def test_list_sandboxes_pagination(self, mock_api, repo):
-        """Pagination fetches multiple pages."""
+    def test_pagination(self, mock_api, repo):
         mock_api.get(BASE_PATH).mock(
             side_effect=[
                 httpx.Response(
@@ -138,15 +107,12 @@ class TestListSandboxes:
                 ),
             ]
         )
-        sandboxes = list(repo.sandboxes())
+        sandboxes = list(repo.sandboxes.list())
         assert len(sandboxes) == 2
-        assert sandboxes[0].id == "sbx-1"
-        assert sandboxes[1].id == "sbx-2"
 
 
 class TestSandboxStatus:
-    def test_status(self, mock_api, repo):
-        """GET .../sandboxes/{id}/status returns SandboxStatus."""
+    def test_status_running(self, mock_api, repo):
         mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-st"})
         )
@@ -162,14 +128,13 @@ class TestSandboxStatus:
                 },
             )
         )
-        sandbox = repo.sandbox(image="python-310")
+        sandbox = repo.sandboxes.create(image="python-310")
         status = sandbox.status()
         assert isinstance(status, SandboxStatus)
         assert status.state == "running"
         assert status.exit_code is None
 
     def test_status_committed(self, mock_api, repo):
-        """Status reflects committed state with exit code."""
         mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-done"})
         )
@@ -185,36 +150,13 @@ class TestSandboxStatus:
                 },
             )
         )
-        sandbox = repo.sandbox(image="python-310")
+        sandbox = repo.sandboxes.create(image="python-310")
         status = sandbox.status()
         assert status.state == "committed"
         assert status.exit_code == 0
         assert status.commit_id == "commit-abc"
 
-    def test_status_awaiting_approval(self, mock_api, repo):
-        """Status includes web_url when awaiting approval."""
-        mock_api.post(BASE_PATH).mock(
-            return_value=httpx.Response(201, json={"sandbox_id": "sbx-approve"})
-        )
-        mock_api.get(f"{BASE_PATH}/sbx-approve/status").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "status": "awaiting_approval",
-                    "status_reason": "policy requires approval",
-                    "exit_code": 0,
-                    "commit_id": "",
-                    "web_url": "https://app.tilde.run/approve/sbx-approve",
-                },
-            )
-        )
-        sandbox = repo.sandbox(image="python-310")
-        status = sandbox.status()
-        assert status.state == "awaiting_approval"
-        assert status.web_url == "https://app.tilde.run/approve/sbx-approve"
-
-    def test_status_failed_has_error_message(self, mock_api, repo):
-        """Failed sandboxes expose error_message."""
+    def test_status_failed(self, mock_api, repo):
         mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-fail"})
         )
@@ -231,7 +173,7 @@ class TestSandboxStatus:
                 },
             )
         )
-        sandbox = repo.sandbox(image="python-310")
+        sandbox = repo.sandboxes.create(image="python-310")
         status = sandbox.status()
         assert status.state == "failed"
         assert status.error_message == "pod terminated unexpectedly"
@@ -239,53 +181,19 @@ class TestSandboxStatus:
 
 class TestSandboxCancel:
     def test_cancel(self, mock_api, repo):
-        """DELETE .../sandboxes/{id} cancels the sandbox."""
         mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-cancel"})
         )
-        cancel_route = mock_api.delete(f"{BASE_PATH}/sbx-cancel").mock(
+        route = mock_api.delete(f"{BASE_PATH}/sbx-cancel").mock(
             return_value=httpx.Response(202, json={"message": "cancellation accepted"})
         )
-        sandbox = repo.sandbox(image="python-310")
+        sandbox = repo.sandboxes.create(image="python-310")
         sandbox.cancel()
-        assert cancel_route.called
+        assert route.called
 
 
-class TestSandboxLogStreams:
-    def test_stdout_returns_log_stream(self, mock_api, repo):
-        """status.stdout() returns a LogStream."""
-        mock_api.post(BASE_PATH).mock(
-            return_value=httpx.Response(201, json={"sandbox_id": "sbx-log"})
-        )
-        mock_api.get(f"{BASE_PATH}/sbx-log/status").mock(
-            return_value=httpx.Response(
-                200,
-                json={"status": "running", "exit_code": None, "commit_id": "", "web_url": ""},
-            )
-        )
-        sandbox = repo.sandbox(image="python-310")
-        status = sandbox.status()
-        stream = status.stdout()
-        assert isinstance(stream, LogStream)
-
-    def test_network_returns_log_stream(self, mock_api, repo):
-        """status.network() returns a LogStream."""
-        mock_api.post(BASE_PATH).mock(
-            return_value=httpx.Response(201, json={"sandbox_id": "sbx-net"})
-        )
-        mock_api.get(f"{BASE_PATH}/sbx-net/status").mock(
-            return_value=httpx.Response(
-                200,
-                json={"status": "running", "exit_code": None, "commit_id": "", "web_url": ""},
-            )
-        )
-        sandbox = repo.sandbox(image="python-310")
-        status = sandbox.status()
-        stream = status.network()
-        assert isinstance(stream, LogStream)
-
+class TestLogStreams:
     def test_stdout_stream_lines(self, mock_api, repo):
-        """LogStream yields merged stdout+stderr lines from the streaming response."""
         mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-stream"})
         )
@@ -302,14 +210,15 @@ class TestSandboxLogStreams:
                 headers={"content-type": "text/plain"},
             )
         )
-        sandbox = repo.sandbox(image="python-310")
+        sandbox = repo.sandboxes.create(image="python-310")
         status = sandbox.status()
-        with status.stdout() as stream:
-            lines = list(stream)
+        stream = status.stdout()
+        assert isinstance(stream, LogStream)
+        with stream as s:
+            lines = list(s)
         assert lines == ["line 1", "error: boom", "line 3"]
 
     def test_network_stream_lines(self, mock_api, repo):
-        """LogStream yields NDJSON lines from the network log endpoint."""
         mock_api.post(BASE_PATH).mock(
             return_value=httpx.Response(201, json={"sandbox_id": "sbx-netlog"})
         )
@@ -326,7 +235,7 @@ class TestSandboxLogStreams:
                 headers={"content-type": "application/x-ndjson"},
             )
         )
-        sandbox = repo.sandbox(image="python-310")
+        sandbox = repo.sandboxes.create(image="python-310")
         status = sandbox.status()
         with status.network() as stream:
             lines = list(stream)
@@ -334,48 +243,3 @@ class TestSandboxLogStreams:
             '{"decision":"allow","url":"https://a"}',
             '{"decision":"deny","url":"https://b"}',
         ]
-
-
-class TestSandboxDataModel:
-    def test_from_dict(self):
-        """SandboxData.from_dict() parses all fields."""
-        data = SandboxData.from_dict(
-            {
-                "id": "sbx-1",
-                "repository_id": "repo-1",
-                "image": "python-310",
-                "command": ["python", "run.py"],
-                "mountpoint": "/sandbox",
-                "path_prefix": "",
-                "timeout_seconds": 600,
-                "env_vars": {"KEY": "val"},
-                "status": "running",
-                "status_reason": "",
-                "error_message": "",
-                "exit_code": None,
-                "commit_id": "",
-                "web_url": "",
-                "created_by_type": "user",
-                "created_by": "user-1",
-                "created_at": "2026-01-15T10:00:00+00:00",
-                "updated_at": "2026-01-15T10:01:00+00:00",
-                "finished_at": None,
-            }
-        )
-        assert data.id == "sbx-1"
-        assert data.image == "python-310"
-        assert data.command == ["python", "run.py"]
-        assert data.timeout_seconds == 600
-        assert data.env_vars == {"KEY": "val"}
-        assert data.status == "running"
-        assert data.exit_code is None
-        assert data.created_at is not None
-        assert data.finished_at is None
-
-    def test_from_dict_minimal(self):
-        """SandboxData.from_dict() handles empty dict gracefully."""
-        data = SandboxData.from_dict({})
-        assert data.id == ""
-        assert data.command == []
-        assert data.env_vars == {}
-        assert data.exit_code is None

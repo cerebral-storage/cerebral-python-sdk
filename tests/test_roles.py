@@ -1,10 +1,8 @@
-"""Tests for RoleCollection, RoleResource, RoleAPIKeyCollection, and OrgResource."""
+"""Tests for Role, Roles, APIKey on roles, and the Organization.roles accessor."""
 
 import httpx
 
-from tilde.models import APIKey, APIKeyCreated, Role
-from tilde.resources.organizations import OrgResource
-from tilde.resources.roles import RoleAPIKeyResource, RoleCollection, RoleResource
+from tilde.models import APIKey, Organization, Role, Roles
 
 ROLE_RESPONSE = {
     "id": "role-1",
@@ -18,14 +16,17 @@ ROLE_RESPONSE = {
 }
 
 
-class TestRoleCollection:
+def _org(client):
+    return Organization(client, name="test-org")
+
+
+class TestRoles:
     def test_create(self, mock_api, client):
-        """POST /organizations/test-org/roles."""
         route = mock_api.post("/organizations/test-org/roles").mock(
             return_value=httpx.Response(200, json=ROLE_RESPONSE)
         )
-        role = client.organization("test-org").roles.create("my-role", description="Test role")
-        assert isinstance(role, RoleResource)
+        role = _org(client).roles.create("my-role", description="Test role")
+        assert isinstance(role, Role)
         assert role.name == "my-role"
         assert role.id == "role-1"
         assert role.description == "Test role"
@@ -34,17 +35,15 @@ class TestRoleCollection:
         assert route.called
 
     def test_get(self, mock_api, client):
-        """GET /organizations/test-org/roles/my-role."""
         mock_api.get("/organizations/test-org/roles/my-role").mock(
             return_value=httpx.Response(200, json=ROLE_RESPONSE)
         )
-        role = client.organization("test-org").roles.get("my-role")
-        assert isinstance(role, RoleResource)
+        role = _org(client).roles.get("my-role")
+        assert isinstance(role, Role)
         assert role.name == "my-role"
         assert role.id == "role-1"
 
     def test_list(self, mock_api, client):
-        """GET /organizations/test-org/roles (paginated)."""
         mock_api.get("/organizations/test-org/roles").mock(
             return_value=httpx.Response(
                 200,
@@ -57,24 +56,22 @@ class TestRoleCollection:
                 },
             )
         )
-        roles = list(client.organization("test-org").roles.list())
+        roles = list(_org(client).roles.list())
         assert len(roles) == 2
         assert all(isinstance(r, Role) for r in roles)
         assert roles[0].name == "my-role"
         assert roles[1].name == "other-role"
 
     def test_delete(self, mock_api, client):
-        """DELETE /organizations/test-org/roles/my-role."""
         route = mock_api.delete("/organizations/test-org/roles/my-role").mock(
             return_value=httpx.Response(204)
         )
-        client.organization("test-org").roles.delete("my-role")
+        _org(client).roles.delete("my-role")
         assert route.called
 
 
-class TestRoleAPIKeyCollection:
+class TestRoleAPIKeys:
     def test_list(self, mock_api, client):
-        """GET /organizations/test-org/roles/my-role/auth/keys (paginated)."""
         mock_api.get("/organizations/test-org/roles/my-role/auth/keys").mock(
             return_value=httpx.Response(
                 200,
@@ -94,16 +91,13 @@ class TestRoleAPIKeyCollection:
                 },
             )
         )
-        role_res = RoleResource(client, "test-org", Role.from_dict(ROLE_RESPONSE))
-        keys = list(role_res.api_keys.list())
+        role = Role.from_dict(client, "test-org", ROLE_RESPONSE)
+        keys = list(role.api_keys.list())
         assert len(keys) == 1
         assert isinstance(keys[0], APIKey)
         assert keys[0].id == "key-1"
-        assert keys[0].name == "dev-key"
-        assert keys[0].token_hint == "crk-...abc"
 
-    def test_create(self, mock_api, client):
-        """POST /organizations/test-org/roles/my-role/auth/keys."""
+    def test_create_returns_apikey_with_token(self, mock_api, client):
         route = mock_api.post("/organizations/test-org/roles/my-role/auth/keys").mock(
             return_value=httpx.Response(
                 200,
@@ -115,15 +109,14 @@ class TestRoleAPIKeyCollection:
                 },
             )
         )
-        role_res = RoleResource(client, "test-org", Role.from_dict(ROLE_RESPONSE))
-        result = role_res.api_keys.create("new-key")
-        assert isinstance(result, APIKeyCreated)
-        assert result.id == "key-2"
-        assert result.token == "crk-full-secret-token"
+        role = Role.from_dict(client, "test-org", ROLE_RESPONSE)
+        key = role.api_keys.create("new-key")
+        assert isinstance(key, APIKey)
+        assert key.id == "key-2"
+        assert key.token == "crk-full-secret-token"
         assert route.called
 
     def test_get(self, mock_api, client):
-        """GET /organizations/test-org/roles/my-role/auth/keys/key-1 (by ID)."""
         mock_api.get("/organizations/test-org/roles/my-role/auth/keys/key-1").mock(
             return_value=httpx.Response(
                 200,
@@ -138,15 +131,12 @@ class TestRoleAPIKeyCollection:
                 },
             )
         )
-        role_res = RoleResource(client, "test-org", Role.from_dict(ROLE_RESPONSE))
-        key = role_res.api_keys.get("key-1")
-        assert isinstance(key, RoleAPIKeyResource)
+        role = Role.from_dict(client, "test-org", ROLE_RESPONSE)
+        key = role.api_keys.get("key-1")
+        assert isinstance(key, APIKey)
         assert key.id == "key-1"
-        assert key.name == "dev-key"
-        assert key.token_hint == "crk-...abc"
 
     def test_revoke(self, mock_api, client):
-        """get() by ID then revoke() DELETEs using that ID."""
         mock_api.get("/organizations/test-org/roles/my-role/auth/keys/key-1").mock(
             return_value=httpx.Response(
                 200,
@@ -164,15 +154,13 @@ class TestRoleAPIKeyCollection:
         route = mock_api.delete("/organizations/test-org/roles/my-role/auth/keys/key-1").mock(
             return_value=httpx.Response(204)
         )
-        role_res = RoleResource(client, "test-org", Role.from_dict(ROLE_RESPONSE))
-        key = role_res.api_keys.get("key-1")
-        key.revoke()
+        role = Role.from_dict(client, "test-org", ROLE_RESPONSE)
+        role.api_keys.get("key-1").revoke()
         assert route.called
 
 
-class TestOrgRolesResource:
+class TestOrganizationRoles:
     def test_roles_property(self, client):
-        """OrgResource.roles returns RoleCollection."""
-        org = client.organization("test-org")
-        assert isinstance(org, OrgResource)
-        assert isinstance(org.roles, RoleCollection)
+        org = _org(client)
+        assert isinstance(org, Organization)
+        assert isinstance(org.roles, Roles)

@@ -1,11 +1,11 @@
-"""Tests for ReadOnlyObjectCollection and SessionObjectCollection."""
+"""Tests for ReadOnlyObjects and SessionObjects."""
 
 import httpx
 
 from tilde.models import CopyObjectResult, ListingEntry, ObjectMetadata, PutObjectResult
 
 
-class TestReadOnlyObjectCollection:
+class TestReadOnlyObjects:
     def test_list(self, mock_api, repo):
         """GET .../objects with pagination (no session)."""
         mock_api.get("/organizations/test-org/repositories/test-repo/objects").mock(
@@ -38,9 +38,9 @@ class TestReadOnlyObjectCollection:
                 },
             )
         )
-        from tilde.resources.objects import ReadOnlyObjectCollection
+        from tilde.resources.objects import ReadOnlyObjects
 
-        objects = ReadOnlyObjectCollection(repo._client, "test-org", "test-repo")
+        objects = ReadOnlyObjects(repo._client, "test-org", "test-repo")
         items = list(objects.list())
         assert len(items) == 2
         assert all(isinstance(i, ListingEntry) for i in items)
@@ -60,9 +60,9 @@ class TestReadOnlyObjectCollection:
                 },
             )
         )
-        from tilde.resources.objects import ReadOnlyObjectCollection
+        from tilde.resources.objects import ReadOnlyObjects
 
-        objects = ReadOnlyObjectCollection(repo._client, "test-org", "test-repo")
+        objects = ReadOnlyObjects(repo._client, "test-org", "test-repo")
         meta = objects.head("foo")
         assert isinstance(meta, ObjectMetadata)
         assert meta.etag == '"abc123"'
@@ -71,7 +71,7 @@ class TestReadOnlyObjectCollection:
         assert meta.reproducible is True
 
 
-class TestSessionObjectCollection:
+class TestSessionObjects:
     def test_list(self, mock_api, repo):
         """GET .../objects?session_id=... with pagination."""
         mock_api.post("/organizations/test-org/repositories/test-repo/sessions").mock(

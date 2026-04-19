@@ -5,21 +5,25 @@ bearer token scoped to the sandbox's target principal.  The server-side spec
 is the *Sandbox Identity Metadata Endpoint* design, modeled after AWS IMDS /
 ECS task roles.
 
-When :envvar:`TILDE_SANDBOX_CREDENTIALS_URI` is set, the SDK fetches tokens
-from that URL instead of requiring a static API key, refreshing before
-expiry.  When :envvar:`TILDE_API_URL` is also set, it supplies the base URL
-of the Tilde API to call with those tokens.
+When :envvar:`TILDE_SANDBOX_CREDENTIALS_URI` is set and no static API key is
+configured, the SDK fetches tokens from that URL and refreshes them before
+expiry.  Statically configured credentials (``Client(api_key=...)``,
+:envvar:`TILDE_API_KEY`, or ``~/.tilde/config.yaml``) always take precedence
+so a caller's deliberate credentials are never silently overridden by the
+sandbox metadata endpoint.  When :envvar:`TILDE_API_URL` is also set, it
+supplies the base URL of the Tilde API to call with those tokens.
 """
 
 from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
 
+from tilde._isoparse import parse_iso_datetime
 from tilde.exceptions import ConfigurationError, SerializationError, TransportError
 
 ENV_SANDBOX_CREDENTIALS_URI = "TILDE_SANDBOX_CREDENTIALS_URI"
@@ -105,7 +109,7 @@ class SandboxCredentialsProvider:
     # -- internals -----------------------------------------------------------
 
     def _is_expiring(self, creds: SandboxCredentials) -> bool:
-        return datetime.now(UTC) + _REFRESH_LEEWAY >= creds.expires_at
+        return datetime.now(timezone.utc) + _REFRESH_LEEWAY >= creds.expires_at
 
     def _fetch(self) -> SandboxCredentials:
         try:
@@ -156,9 +160,9 @@ def _parse_credentials(payload: Any) -> SandboxCredentials:
 
 
 def _parse_expires_at(value: str) -> datetime:
-    dt = datetime.fromisoformat(value)
+    dt = parse_iso_datetime(value)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
+        dt = dt.replace(tzinfo=timezone.utc)
     return dt
 
 

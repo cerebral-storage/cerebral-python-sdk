@@ -1,10 +1,8 @@
-"""Tests for Commit resource and repo.timeline()."""
+"""Tests for Commit and Commits."""
 
 import httpx
 
-from tilde.models import CommitData, ListingEntry
-from tilde.resources.commits import Commit
-from tilde.resources.objects import ReadOnlyObjectCollection
+from tilde.models import Commit, ListingEntry, ReadOnlyObjects
 
 COMMIT_JSON = {
     "id": "abc123",
@@ -22,9 +20,9 @@ COMMIT_JSON = {
 }
 
 
-class TestTimeline:
-    def test_timeline(self, mock_api, repo):
-        """repo.timeline() returns paginated CommitData."""
+class TestCommits:
+    def test_list_returns_commits(self, mock_api, repo):
+        """repo.commits.list() yields Commit entities."""
         mock_api.get("/organizations/test-org/repositories/test-repo/log").mock(
             return_value=httpx.Response(
                 200,
@@ -53,20 +51,27 @@ class TestTimeline:
                 },
             )
         )
-        commits = list(repo.timeline())
+        commits = list(repo.commits.list())
         assert len(commits) == 2
-        assert all(isinstance(c, CommitData) for c in commits)
+        assert all(isinstance(c, Commit) for c in commits)
         assert commits[0].id == "c1"
         assert commits[1].id == "c2"
 
-
-class TestCommit:
-    def test_properties(self, mock_api, repo):
-        """All lazy-loaded properties are populated correctly."""
+    def test_get_by_id(self, mock_api, repo):
         mock_api.get("/organizations/test-org/repositories/test-repo/commits/abc123").mock(
             return_value=httpx.Response(200, json=COMMIT_JSON)
         )
-        commit = Commit(repo._client, "test-org", "test-repo", "abc123")
+        commit = repo.commits.get("abc123")
+        assert isinstance(commit, Commit)
+        assert commit.id == "abc123"
+
+
+class TestCommitEntity:
+    def test_properties(self, mock_api, repo):
+        mock_api.get("/organizations/test-org/repositories/test-repo/commits/abc123").mock(
+            return_value=httpx.Response(200, json=COMMIT_JSON)
+        )
+        commit = repo.commits.get("abc123")
         assert commit.id == "abc123"
         assert commit.committer == "user-1"
         assert commit.committer_type == "user"
@@ -81,37 +86,32 @@ class TestCommit:
         assert commit.total_size == 123456
         assert commit.is_stale is False
 
-    def test_objects_readonly(self, mock_api, repo):
-        """Commit.objects returns ReadOnlyObjectCollection."""
-        commit = Commit(repo._client, "test-org", "test-repo", "abc123")
-        objects = commit.objects
-        assert isinstance(objects, ReadOnlyObjectCollection)
+    def test_objects_readonly(self, repo):
+        commit = Commit(repo._client, "test-org", "test-repo", id="abc123")
+        assert isinstance(commit.objects, ReadOnlyObjects)
 
     def test_revert(self, mock_api, repo):
-        """commit.revert() POSTs to .../commits/{id}/revert and returns a new Commit."""
         mock_api.get("/organizations/test-org/repositories/test-repo/commits/abc123").mock(
             return_value=httpx.Response(200, json=COMMIT_JSON)
         )
         mock_api.post("/organizations/test-org/repositories/test-repo/commits/abc123/revert").mock(
             return_value=httpx.Response(201, json={"commit_id": "revert-1"})
         )
-        commit = Commit(repo._client, "test-org", "test-repo", "abc123")
+        commit = Commit(repo._client, "test-org", "test-repo", id="abc123")
         reverted = commit.revert(message="undo change", metadata={"reason": "bug"})
         assert isinstance(reverted, Commit)
         assert reverted.id == "revert-1"
 
     def test_revert_default_message(self, mock_api, repo):
-        """commit.revert() with no arguments sends empty body."""
         route = mock_api.post(
             "/organizations/test-org/repositories/test-repo/commits/abc123/revert"
         ).mock(return_value=httpx.Response(201, json={"commit_id": "revert-2"}))
-        commit = Commit(repo._client, "test-org", "test-repo", "abc123")
+        commit = Commit(repo._client, "test-org", "test-repo", id="abc123")
         reverted = commit.revert()
         assert reverted.id == "revert-2"
         assert route.called
 
     def test_diff(self, mock_api, repo):
-        """commit.diff() diffs this commit against its first parent."""
         mock_api.get("/organizations/test-org/repositories/test-repo/commits/abc123").mock(
             return_value=httpx.Response(200, json=COMMIT_JSON)
         )
@@ -147,7 +147,7 @@ class TestCommit:
                 },
             )
         )
-        commit = Commit(repo._client, "test-org", "test-repo", "abc123")
+        commit = Commit(repo._client, "test-org", "test-repo", id="abc123")
         items = list(commit.diff())
         assert len(items) == 2
         assert all(isinstance(i, ListingEntry) for i in items)

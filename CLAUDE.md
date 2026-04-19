@@ -34,13 +34,55 @@ docs/                   # MkDocs (material theme) documentation
 openapi.yaml            # OpenAPI spec for the Tilde API
 ```
 
+## Naming Conventions
+
+The public API follows a strict, uniform shape. Resource classes are **singular
+nouns** that name real entities (`Organization`, `Repository`, `Agent`,
+`Role`, `Sandbox`, `SandboxTrigger`, `Group`, `Policy`, `Connector`, `Secret`,
+`APIKey`, `Commit`, `Member`, `ImportJob`). Never introduce `FooData`,
+`FooResource`, `FooInfo`, `FooSummary`, or `FooDetail` variants — the entity
+class itself carries both data and behaviour.
+
+Collections are **plural nouns** (`organizations`, `repositories`, `members`,
+`agents`, `roles`, `api_keys`, `groups`, `policies`, `connectors`, `sandboxes`,
+`sandbox_triggers`, `imports`, `secrets`, `commits`). They live as attributes
+or properties on the parent entity (or the `Client`).
+
+Every collection exposes the same three verbs where applicable:
+
+- `.list()` → **lazy iterator** (`PaginatedIterator[T]`) of the singular
+  entity. Even non-paginated endpoints wrap their one-shot response in the
+  same iterator contract so callers can always iterate; callers that want a
+  materialised list do ``list(col.list())``. For example,
+  ``tilde.organizations.list()`` yields the organizations the authenticated
+  principal belongs to.
+- `.get(key)` → the singular entity (fetches / resolves by id or name).
+- `.create(...)` → the newly-created singular entity. If the server's POST
+  doesn't return the created entity, the collection follows up with a GET so
+  the caller always receives a populated entity instance.
+
+There is exactly **one** shorthand exception: `tilde.repository('org/repo')`
+returns a `Repository` directly. The shorthand does not exist for any other
+entity — callers use the full
+`tilde.organizations.get('org').repositories.get('repo')` chain (or the
+equivalent on a `Client`).
+
+Entity classes are plain regular classes (not `@dataclass`), constructed
+internally with a client reference plus their fields. They expose data via
+attributes/properties and actions via methods. Sub-collections are exposed as
+plural-noun properties (e.g. `organization.repositories`,
+`agent.api_keys`). Value-only helper types (`Entry`, `ListingEntry`,
+`ValidationResult`, `PutObjectResult`, etc.) remain `@dataclass(slots=True)`
+because they are pure data with no behaviour.
+
 ## Key Architecture Details
 
 - **HTTP layer**: `Client` wraps `httpx.Client` with lazy initialization and proper cleanup via context manager. Methods: `_get`, `_post`, `_put`, `_delete`, `_head`, `_stream`, plus `_*_json` convenience variants.
 - **Resources**: Each API domain has a resource class. The `Client` creates resources; resources hold a back-reference to the client for HTTP calls.
 - **Sessions**: Transactional model — `repo.session()` returns a context manager that auto-rolls back on exception. Supports `commit(message)` and `rollback()`.
 - **Pagination**: Generic `PaginatedIterator[T]` using offset-based `after` cursor, default page size 100.
-- **Models**: Frozen `@dataclass(slots=True)` with `from_dict()` classmethods. ISO 8601 datetime parsing via `_parse_dt()`. All dataclass models must use the `@_compact_repr` decorator (defined in `models.py`) so that `repr()` omits default-valued fields. New resource classes (non-dataclass) must define a `__repr__` that shows key identifying info (e.g. `Repository('org/name')`, `Session(id='...')`).
+- **Models**: Pure value-only helper types (`Entry`, `ListingEntry`, `ValidationResult`, `PutObjectResult`, `CopyObjectResult`, `ObjectMetadata`, `CommitResult`, `SourceMetadata`) are frozen `@dataclass(slots=True)` with `from_dict()` classmethods. They must use the `@_compact_repr` decorator (defined in `models.py`) so that `repr()` omits default-valued fields. ISO 8601 datetime parsing via `_parse_dt()`.
+- **Entity classes** (see *Naming Conventions*): regular classes living in `resources/`. They hold a client reference, carry their data via attributes, and define `__repr__` that shows key identifying info (e.g. `Repository('org/name')`, `Session(id='...')`). They expose sub-collections as plural-noun properties.
 - **OutputStream** (`_output_stream.py`): Stream wrapper for sandbox command stdout/stderr. `RunResult.stdout` and `RunResult.stderr` are `OutputStream` instances. Methods: `read()` → bytes, `text(encoding)` → str, `iter_bytes(chunk_size)`, `iter_text(chunk_size)`, `iter_lines()`. Supports lazy loading from HTTP endpoints (data fetched and cached on first access) or in-memory construction from bytes.
 - **Errors**: `TildeError` base → `APIError` (HTTP 400+) → status-specific subclasses (401, 403, 404, 409, 410, 412, 423, 5xx). Also `ConfigurationError`, `TransportError`, `SerializationError`.
 ## Commands
@@ -127,7 +169,12 @@ If detect-secrets flags a new false positive:
 
 ## Code Style
 
-- **Ruff** with line-length 100, target Python 3.11
+- **Ruff** with line-length 100, target Python 3.10
 - Rule sets: E, F, I, UP, B, SIM, TCH, RUF
 - **mypy** strict mode enabled
-- All public types are re-exported from `tilde.__init__`
+- **Top-level `tilde` surface is intentionally tiny**: ``Client``,
+  ``configure``, ``repository``, ``organizations`` (a live property on the
+  module, powered by a ``types.ModuleType`` subclass), and ``__version__``.
+  Every noun — entity classes and plural collections — lives in
+  :mod:`tilde.models`. Every error lives in :mod:`tilde.exceptions`. Nothing
+  else is re-exported at the top level.

@@ -12,8 +12,8 @@ import click
 from websockets.sync.client import connect as ws_connect
 
 from tilde._output_stream import OutputStream
+from tilde._value_types import RunResult
 from tilde.exceptions import CommandError, SandboxError
-from tilde.models import RunResult
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from websockets.sync.client import ClientConnection
 
     from tilde.client import Client
-    from tilde.resources.sandboxes import SandboxResource
+    from tilde.resources.sandboxes import Sandbox
 
 _POLL_INTERVAL = 1.0
 _POLL_TIMEOUT = 300.0
@@ -55,14 +55,14 @@ class Shell:
     def __init__(
         self,
         client: Client,
-        sandbox: SandboxResource,
+        sandbox: Sandbox,
     ) -> None:
         self._client = client
         self._sandbox = sandbox
         self._ws: ClientConnection | None = None
 
     def __repr__(self) -> str:
-        return f"Shell(sandbox='{self._sandbox.id}')"
+        return f"Shell(sandbox={self._sandbox.id!r})"
 
     def __enter__(self) -> Shell:
         self._wait_for_running()
@@ -205,7 +205,7 @@ class Shell:
             f"{self._client._ws_base_url}"
             f"/organizations/{self._sandbox._org}"
             f"/repositories/{self._sandbox._repo}"
-            f"/sandboxes/{self._sandbox._sandbox_id}/terminal"
+            f"/sandboxes/{self._sandbox.id}/terminal"
         )
         self._ws = ws_connect(
             ws_url,

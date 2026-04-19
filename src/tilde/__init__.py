@@ -4,146 +4,38 @@ Quick start::
 
     import tilde
 
+    # One-shot shorthand for a specific repo
     repo = tilde.repository('my-org/repo1')
 
-    with repo.session() as session:
-        session.objects.put('foo/bar.csv', b'data')
-        session.commit('update data')
+    # Full chain for every other entity
+    org = tilde.organizations.get('my-org')
+    for repo in org.repositories.list():
+        print(repo.name)
+
+The top-level namespace is intentionally small: just :class:`Client`,
+:func:`configure`, :func:`repository`, and :data:`organizations`.  Entity
+classes live in :mod:`tilde.models`; exception classes live in
+:mod:`tilde.exceptions`.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import sys as _sys
+import types as _types
+from typing import TYPE_CHECKING as _TYPE_CHECKING
 
-from tilde._credentials import SandboxCredentials, SandboxCredentialsProvider
-from tilde._output_stream import OutputStream
 from tilde._version import __version__
 from tilde.client import Client
-from tilde.exceptions import (
-    APIError,
-    AuthenticationError,
-    BadRequestError,
-    CommandError,
-    ConfigurationError,
-    ConflictError,
-    ForbiddenError,
-    GoneError,
-    LockedError,
-    NotFoundError,
-    PreconditionFailedError,
-    SandboxError,
-    SerializationError,
-    ServerError,
-    TildeError,
-    TransportError,
-)
-from tilde.models import (
-    Agent,
-    APIKey,
-    APIKeyCreated,
-    AttachmentRecord,
-    CommitData,
-    CommitResult,
-    ConnectorInfo,
-    CopyObjectResult,
-    EffectiveGroup,
-    EffectivePolicy,
-    Entry,
-    EntryRecord,
-    Group,
-    GroupDetail,
-    GroupMember,
-    ImportJob,
-    ListingEntry,
-    Membership,
-    ObjectMetadata,
-    Organization,
-    OrgSummary,
-    Policy,
-    PolicyDetail,
-    PolicySummary,
-    PutObjectResult,
-    RepositoryData,
-    RepositoryWithOrg,
-    Role,
-    RunResult,
-    SandboxData,
-    SandboxTriggerCondition,
-    SandboxTriggerConfig,
-    SandboxTriggerData,
-    SandboxTriggerRunData,
-    SecretEntry,
-    SourceMetadata,
-    ValidationError,
-    ValidationResult,
-)
 
-if TYPE_CHECKING:
-    from tilde.resources.organizations import OrganizationCollection, OrgResource
+if _TYPE_CHECKING:
+    from tilde._credentials import SandboxCredentialsProvider
+    from tilde.resources.organizations import Organizations
     from tilde.resources.repositories import Repository
 
 __all__ = [
-    "APIError",
-    "APIKey",
-    "APIKeyCreated",
-    "Agent",
-    "AttachmentRecord",
-    "AuthenticationError",
-    "BadRequestError",
     "Client",
-    "CommandError",
-    "CommitData",
-    "CommitResult",
-    "ConfigurationError",
-    "ConflictError",
-    "ConnectorInfo",
-    "CopyObjectResult",
-    "EffectiveGroup",
-    "EffectivePolicy",
-    "Entry",
-    "EntryRecord",
-    "ForbiddenError",
-    "GoneError",
-    "Group",
-    "GroupDetail",
-    "GroupMember",
-    "ImportJob",
-    "ListingEntry",
-    "LockedError",
-    "Membership",
-    "NotFoundError",
-    "ObjectMetadata",
-    "OrgSummary",
-    "Organization",
-    "OutputStream",
-    "Policy",
-    "PolicyDetail",
-    "PolicySummary",
-    "PreconditionFailedError",
-    "PutObjectResult",
-    "RepositoryData",
-    "RepositoryWithOrg",
-    "Role",
-    "RunResult",
-    "SandboxCredentials",
-    "SandboxCredentialsProvider",
-    "SandboxData",
-    "SandboxError",
-    "SandboxTriggerCondition",
-    "SandboxTriggerConfig",
-    "SandboxTriggerData",
-    "SandboxTriggerRunData",
-    "SecretEntry",
-    "SerializationError",
-    "ServerError",
-    "SourceMetadata",
-    "TildeError",
-    "TransportError",
-    "ValidationError",
-    "ValidationResult",
     "__version__",
     "configure",
-    "organization",
     "organizations",
     "repository",
 ]
@@ -158,10 +50,8 @@ def configure(
     default_sandbox_image: str | None = None,
     credentials_provider: SandboxCredentialsProvider | None = None,
 ) -> None:
-    """Configure the default client.
-
-    Resets the default client so subsequent calls to :func:`repository` and
-    :func:`organizations` use the new configuration.
+    """(Re)configure the default client used by :data:`organizations`
+    and :func:`repository`.
     """
     global _default_client
     if _default_client is not None:
@@ -182,20 +72,32 @@ def _get_default_client() -> Client:
 
 
 def repository(repo_path: str) -> Repository:
-    """Get a repository using the default client.
+    """Get a :class:`~tilde.models.Repository` via the default client.
 
-    Args:
-        repo_path: Repository path in ``"org/repo"`` format.
+    ``tilde.repository('org/repo')`` is the only shorthand in the SDK; every
+    other entity is reached through :data:`organizations`.
     """
     return _get_default_client().repository(repo_path)
 
 
-def organization(org: str) -> OrgResource:
-    """Get an organization resource using the default client."""
-    return _get_default_client().organization(org)
+class _TildeModule(_types.ModuleType):
+    """Module subclass that exposes ``organizations`` as a live attribute.
+
+    Using a ModuleType subclass (rather than PEP 562 ``__getattr__``) means
+    ``organizations`` appears in :func:`dir` and in static introspection,
+    matching the documented public surface.
+    """
+
+    @property
+    def organizations(self) -> Organizations:
+        """The :class:`~tilde.models.Organizations` collection on the default client."""
+        return _get_default_client().organizations
+
+    def __dir__(self) -> list[str]:
+        base = list(super().__dir__())
+        if "organizations" not in base:
+            base.append("organizations")
+        return sorted(base)
 
 
-@property  # type: ignore[misc]
-def organizations() -> OrganizationCollection:
-    """Access organizations using the default client."""
-    return _get_default_client().organizations
+_sys.modules[__name__].__class__ = _TildeModule

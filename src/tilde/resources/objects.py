@@ -10,8 +10,8 @@ import httpx
 
 from tilde._object_reader import ObjectReader
 from tilde._pagination import DEFAULT_PAGE_SIZE, PageResult, PaginatedIterator
+from tilde._value_types import CopyObjectResult, ListingEntry, ObjectMetadata, PutObjectResult
 from tilde.exceptions import APIError, TransportError
-from tilde.models import CopyObjectResult, ListingEntry, ObjectMetadata, PutObjectResult
 
 if TYPE_CHECKING:
     import builtins
@@ -74,7 +74,7 @@ def _iter_parts(
         yield part_number, bytes(buf)
 
 
-class ReadOnlyObjectCollection:
+class ReadOnlyObjects:
     """Object access scoped to a committed snapshot (no session)."""
 
     def __init__(self, client: Client, org: str, repo: str) -> None:
@@ -93,6 +93,7 @@ class ReadOnlyObjectCollection:
         delimiter: str | None = None,
         after: str | None = None,
         amount: int | None = None,
+        page_size: int | None = None,
     ) -> PaginatedIterator[ListingEntry]:
         """List objects, auto-paginating.
 
@@ -100,7 +101,8 @@ class ReadOnlyObjectCollection:
             prefix: Filter by key prefix.
             delimiter: Directory grouping delimiter (e.g. ``"/"``).
             after: Starting offset for the first page.
-            amount: Page size (default 100).
+            amount: Maximum total results the iterator will yield.
+            page_size: Server-side page size used per request (default 100).
         """
         initial_after = after
 
@@ -113,10 +115,7 @@ class ReadOnlyObjectCollection:
                 params["prefix"] = prefix
             if delimiter is not None:
                 params["delimiter"] = delimiter
-            if amount is not None:
-                params["amount"] = amount
-            else:
-                params["amount"] = DEFAULT_PAGE_SIZE
+            params["amount"] = page_size if page_size is not None else DEFAULT_PAGE_SIZE
             data = self._client._get_json(f"{self._repo_path}/objects", params=params)
             items = [ListingEntry.from_dict(d) for d in data.get("results", [])]
             pagination = data.get("pagination", {})
@@ -127,7 +126,7 @@ class ReadOnlyObjectCollection:
                 max_per_page=pagination.get("max_per_page"),
             )
 
-        return PaginatedIterator(fetch_page)
+        return PaginatedIterator(fetch_page, limit=amount)
 
     def get(
         self,
@@ -186,7 +185,7 @@ class ReadOnlyObjectCollection:
         )
 
 
-class SessionObjectCollection:
+class SessionObjects:
     """Object access within a session — supports read and write operations."""
 
     def __init__(self, client: Client, org: str, repo: str, session_id: str) -> None:
@@ -206,8 +205,13 @@ class SessionObjectCollection:
         delimiter: str | None = None,
         after: str | None = None,
         amount: int | None = None,
+        page_size: int | None = None,
     ) -> PaginatedIterator[ListingEntry]:
-        """List objects in this session, auto-paginating."""
+        """List objects in this session, auto-paginating.
+
+        ``amount`` caps the total number of results yielded by the iterator.
+        ``page_size`` sets the server-side page size used for each request.
+        """
         initial_after = after
 
         def fetch_page(cursor: str | None) -> PageResult[ListingEntry]:
@@ -219,10 +223,7 @@ class SessionObjectCollection:
                 params["prefix"] = prefix
             if delimiter is not None:
                 params["delimiter"] = delimiter
-            if amount is not None:
-                params["amount"] = amount
-            else:
-                params["amount"] = DEFAULT_PAGE_SIZE
+            params["amount"] = page_size if page_size is not None else DEFAULT_PAGE_SIZE
             data = self._client._get_json(f"{self._repo_path}/objects", params=params)
             items = [ListingEntry.from_dict(d) for d in data.get("results", [])]
             pagination = data.get("pagination", {})
@@ -233,7 +234,7 @@ class SessionObjectCollection:
                 max_per_page=pagination.get("max_per_page"),
             )
 
-        return PaginatedIterator(fetch_page)
+        return PaginatedIterator(fetch_page, limit=amount)
 
     def get(
         self,

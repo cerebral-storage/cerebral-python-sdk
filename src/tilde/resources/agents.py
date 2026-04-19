@@ -1,226 +1,109 @@
-"""Agent and API key resources."""
+"""Agent, APIKey, and their plural collections."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from tilde._isoparse import parse_optional as _parse_dt
 from tilde._pagination import DEFAULT_PAGE_SIZE, PageResult, PaginatedIterator
-from tilde.models import Agent, APIKey, APIKeyCreated, SecretEntry
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from tilde.client import Client
-    from tilde.resources.secrets import SecretManager
+    from tilde.resources.secrets import Secrets
 
 
-class APIKeyCollection:
-    """API key operations for an agent."""
+class APIKey:
+    """An API key issued to an agent or role.
 
-    def __init__(self, client: Client, org: str, agent_name: str) -> None:
-        self._client = client
-        self._org = org
-        self._agent_name = agent_name
+    ``token`` is populated only on the ``APIKeys.create(...)`` response (the
+    only moment the full token is ever exposed). Afterwards ``token`` is
+    ``""`` and the key is identified by ``id`` / ``name`` / ``token_hint``.
+    """
 
-    @property
-    def _base_path(self) -> str:
-        return f"/organizations/{self._org}/agents/{self._agent_name}/auth/keys"
-
-    def list(self, *, after: str | None = None) -> PaginatedIterator[APIKey]:
-        """List API keys for this agent."""
-        initial_after = after
-
-        def fetch_page(cursor: str | None) -> PageResult[APIKey]:
-            params: dict[str, str | int] = {"amount": DEFAULT_PAGE_SIZE}
-            effective_after = cursor if cursor is not None else initial_after
-            if effective_after is not None:
-                params["after"] = effective_after
-            data = self._client._get_json(self._base_path, params=params)
-            items = [APIKey.from_dict(d) for d in data.get("results", [])]
-            pagination = data.get("pagination", {})
-            return PageResult(
-                items=items,
-                has_more=pagination.get("has_more", False),
-                next_offset=pagination.get("next_offset"),
-                max_per_page=pagination.get("max_per_page"),
-            )
-
-        return PaginatedIterator(fetch_page)
-
-    def get(self, key_id: str) -> APIKeyResource:
-        """Get an API key by ID.
-
-        Args:
-            key_id: The key's unique identifier (not the display name).
-
-        The returned resource uses the same ``id`` for subsequent operations
-        like :meth:`APIKeyResource.revoke`.
-        """
-        data = self._client._get_json(f"{self._base_path}/{key_id}")
-        return APIKeyResource(self._client, self._base_path, APIKey.from_dict(data))
-
-    def create(self, name: str) -> APIKeyCreated:
-        """Create a new API key for this agent.
-
-        The returned ``APIKeyCreated`` includes the full ``token`` which is
-        only shown once.
-        """
-        data = self._client._post_json(self._base_path, json={"name": name})
-        return APIKeyCreated.from_dict(data)
-
-
-class APIKeyResource:
-    """A single API key with data properties and a revoke method."""
-
-    def __init__(self, client: Client, base_path: str, data: APIKey) -> None:
+    def __init__(
+        self,
+        client: Client,
+        base_path: str,
+        *,
+        id: str = "",
+        name: str = "",
+        description: str = "",
+        token_hint: str = "",
+        token: str = "",
+        created_at: datetime | None = None,
+        last_used_at: datetime | None = None,
+        revoked_at: datetime | None = None,
+    ) -> None:
         self._client = client
         self._base_path = base_path
-        self._data = data
+        self.id = id
+        self.name = name
+        self.description = description
+        self.token_hint = token_hint
+        self.token = token
+        self.created_at = created_at
+        self.last_used_at = last_used_at
+        self.revoked_at = revoked_at
 
     def __repr__(self) -> str:
-        return f"APIKeyResource(name='{self._data.name}', id='{self._data.id}')"
+        return f"APIKey(name={self.name!r}, id={self.id!r})"
 
-    @property
-    def id(self) -> str:
-        return self._data.id
-
-    @property
-    def name(self) -> str:
-        return self._data.name
-
-    @property
-    def description(self) -> str:
-        return self._data.description
-
-    @property
-    def token_hint(self) -> str:
-        return self._data.token_hint
-
-    @property
-    def created_at(self) -> datetime | None:
-        return self._data.created_at
-
-    @property
-    def last_used_at(self) -> datetime | None:
-        return self._data.last_used_at
-
-    @property
-    def revoked_at(self) -> datetime | None:
-        return self._data.revoked_at
+    @classmethod
+    def from_dict(cls, client: Client, base_path: str, d: dict[str, Any]) -> APIKey:
+        return cls(
+            client,
+            base_path,
+            id=d.get("id", ""),
+            name=d.get("name", ""),
+            description=d.get("description", ""),
+            token_hint=d.get("token_hint", ""),
+            token=d.get("token", ""),
+            created_at=_parse_dt(d.get("created_at")),
+            last_used_at=_parse_dt(d.get("last_used_at")),
+            revoked_at=_parse_dt(d.get("revoked_at")),
+        )
 
     def revoke(self) -> None:
         """Revoke this API key."""
-        self._client._delete(f"{self._base_path}/{self._data.id}")
+        self._client._delete(f"{self._base_path}/{self.id}")
+
+    def delete(self) -> None:
+        """Alias for :meth:`revoke`."""
+        self.revoke()
 
 
-class AgentResource:
-    """A single agent with data properties and sub-resource accessors."""
+class APIKeys:
+    """API keys for an agent or role."""
 
-    def __init__(self, client: Client, org: str, data: Agent) -> None:
+    def __init__(self, client: Client, base_path: str) -> None:
         self._client = client
-        self._org = org
-        self._data = data
+        self._base_path = base_path
 
     def __repr__(self) -> str:
-        return f"AgentResource(name='{self._data.name}')"
+        return f"APIKeys(path={self._base_path!r})"
 
-    @property
-    def name(self) -> str:
-        return self._data.name
-
-    @property
-    def id(self) -> str:
-        return self._data.id
-
-    @property
-    def description(self) -> str:
-        return self._data.description
-
-    @property
-    def metadata(self) -> dict[str, str]:
-        return self._data.metadata
-
-    @property
-    def inline_policy(self) -> str:
-        return self._data.inline_policy
-
-    @property
-    def inline_policy_updated_at(self) -> datetime | None:
-        return self._data.inline_policy_updated_at
-
-    @property
-    def created_by_name(self) -> str:
-        return self._data.created_by_name
-
-    @property
-    def created_at(self) -> datetime | None:
-        return self._data.created_at
-
-    @property
-    def last_used_at(self) -> datetime | None:
-        return self._data.last_used_at
-
-    @property
-    def api_keys(self) -> APIKeyCollection:
-        """Access API key operations for this agent."""
-        return APIKeyCollection(self._client, self._org, self._data.name)
-
-    @property
-    def secret(self) -> SecretManager:
-        """Access secret operations for this agent."""
-        from tilde.resources.secrets import SecretManager
-
-        return SecretManager(
-            self._client,
-            f"/organizations/{self._org}/agents/{self._data.name}/secrets",
-        )
-
-    def secrets(self) -> list[SecretEntry]:
-        """List secrets for this agent (keys and metadata only)."""
-        return self.secret.list()
-
-
-class AgentCollection:
-    """Agent operations for an organization."""
-
-    def __init__(self, client: Client, org: str) -> None:
-        self._client = client
-        self._org = org
-
-    @property
-    def _base_path(self) -> str:
-        return f"/organizations/{self._org}/agents"
-
-    def create(
+    def list(
         self,
-        name: str,
         *,
-        description: str = "",
-        metadata: dict[str, str] | None = None,
-    ) -> AgentResource:
-        """Create a new agent."""
-        body: dict[str, Any] = {"name": name, "description": description}
-        if metadata is not None:
-            body["metadata"] = metadata
-        data = self._client._post_json(self._base_path, json=body)
-        return AgentResource(self._client, self._org, Agent.from_dict(data))
-
-    def get(self, name: str) -> AgentResource:
-        """Get an agent by name."""
-        data = self._client._get_json(f"{self._base_path}/{name}")
-        return AgentResource(self._client, self._org, Agent.from_dict(data))
-
-    def list(self, *, after: str | None = None) -> PaginatedIterator[Agent]:
-        """List agents in the organization."""
+        after: str | None = None,
+        amount: int | None = None,
+        page_size: int | None = None,
+    ) -> PaginatedIterator[APIKey]:
         initial_after = after
+        client = self._client
+        base = self._base_path
 
-        def fetch_page(cursor: str | None) -> PageResult[Agent]:
-            params: dict[str, str | int] = {"amount": DEFAULT_PAGE_SIZE}
+        def fetch_page(cursor: str | None) -> PageResult[APIKey]:
+            params: dict[str, str | int] = {
+                "amount": page_size if page_size is not None else DEFAULT_PAGE_SIZE
+            }
             effective_after = cursor if cursor is not None else initial_after
             if effective_after is not None:
                 params["after"] = effective_after
-            data = self._client._get_json(self._base_path, params=params)
-            items = [Agent.from_dict(d) for d in data.get("results", [])]
+            data = client._get_json(base, params=params)
+            items = [APIKey.from_dict(client, base, d) for d in data.get("results", [])]
             pagination = data.get("pagination", {})
             return PageResult(
                 items=items,
@@ -229,17 +112,104 @@ class AgentCollection:
                 max_per_page=pagination.get("max_per_page"),
             )
 
-        return PaginatedIterator(fetch_page)
+        return PaginatedIterator(fetch_page, limit=amount)
+
+    def get(self, key_id: str) -> APIKey:
+        data = self._client._get_json(f"{self._base_path}/{key_id}")
+        return APIKey.from_dict(self._client, self._base_path, data)
+
+    def create(self, name: str) -> APIKey:
+        """Create a new API key.
+
+        The returned :class:`APIKey` has its ``token`` field populated — this
+        is the only opportunity to capture the full secret.
+        """
+        data = self._client._post_json(self._base_path, json={"name": name})
+        return APIKey.from_dict(self._client, self._base_path, data)
+
+    def delete(self, key_id: str) -> None:
+        self._client._delete(f"{self._base_path}/{key_id}")
+
+
+class Agent:
+    """A Tilde agent."""
+
+    def __init__(
+        self,
+        client: Client,
+        org: str,
+        *,
+        id: str = "",
+        name: str = "",
+        description: str = "",
+        metadata: dict[str, str] | None = None,
+        inline_policy: str = "",
+        inline_policy_updated_at: datetime | None = None,
+        organization_id: str = "",
+        created_by_type: str = "",
+        created_by: str = "",
+        created_by_name: str = "",
+        created_at: datetime | None = None,
+        last_used_at: datetime | None = None,
+    ) -> None:
+        self._client = client
+        self._org = org
+        self.id = id
+        self.name = name
+        self.description = description
+        self.metadata = metadata or {}
+        self.inline_policy = inline_policy
+        self.inline_policy_updated_at = inline_policy_updated_at
+        self.organization_id = organization_id
+        self.created_by_type = created_by_type
+        self.created_by = created_by
+        self.created_by_name = created_by_name
+        self.created_at = created_at
+        self.last_used_at = last_used_at
+
+    def __repr__(self) -> str:
+        return f"Agent({self.name!r})"
+
+    @classmethod
+    def from_dict(cls, client: Client, org: str, d: dict[str, Any]) -> Agent:
+        return cls(
+            client,
+            org,
+            id=d.get("id", ""),
+            name=d.get("name", ""),
+            description=d.get("description", ""),
+            metadata=d.get("metadata") or {},
+            inline_policy=d.get("inline_policy", ""),
+            inline_policy_updated_at=_parse_dt(d.get("inline_policy_updated_at")),
+            organization_id=d.get("organization_id", ""),
+            created_by_type=d.get("created_by_type", ""),
+            created_by=d.get("created_by", ""),
+            created_by_name=d.get("created_by_name", ""),
+            created_at=_parse_dt(d.get("created_at")),
+            last_used_at=_parse_dt(d.get("last_used_at")),
+        )
+
+    @property
+    def _base_path(self) -> str:
+        return f"/organizations/{self._org}/agents/{self.name}"
+
+    @property
+    def api_keys(self) -> APIKeys:
+        return APIKeys(self._client, f"{self._base_path}/auth/keys")
+
+    @property
+    def secrets(self) -> Secrets:
+        from tilde.resources.secrets import Secrets
+
+        return Secrets(self._client, f"{self._base_path}/secrets")
 
     def update(
         self,
-        name: str,
         *,
         description: str | None = None,
         metadata: dict[str, str] | None = None,
         inline_policy: str | None = None,
-    ) -> AgentResource:
-        """Update an agent."""
+    ) -> Agent:
         body: dict[str, Any] = {}
         if description is not None:
             body["description"] = description
@@ -247,9 +217,74 @@ class AgentCollection:
             body["metadata"] = metadata
         if inline_policy is not None:
             body["inline_policy"] = inline_policy
-        data = self._client._put_json(f"{self._base_path}/{name}", json=body)
-        return AgentResource(self._client, self._org, Agent.from_dict(data))
+        data = self._client._put_json(self._base_path, json=body)
+        return Agent.from_dict(self._client, self._org, data)
+
+    def delete(self) -> None:
+        self._client._delete(self._base_path)
+
+
+class Agents:
+    """Agents belonging to an organization."""
+
+    def __init__(self, client: Client, org: str) -> None:
+        self._client = client
+        self._org = org
+
+    def __repr__(self) -> str:
+        return f"Agents(org={self._org!r})"
+
+    @property
+    def _base_path(self) -> str:
+        return f"/organizations/{self._org}/agents"
+
+    def list(
+        self,
+        *,
+        after: str | None = None,
+        amount: int | None = None,
+        page_size: int | None = None,
+    ) -> PaginatedIterator[Agent]:
+        initial_after = after
+        client = self._client
+        org = self._org
+        base = self._base_path
+
+        def fetch_page(cursor: str | None) -> PageResult[Agent]:
+            params: dict[str, str | int] = {
+                "amount": page_size if page_size is not None else DEFAULT_PAGE_SIZE
+            }
+            effective_after = cursor if cursor is not None else initial_after
+            if effective_after is not None:
+                params["after"] = effective_after
+            data = client._get_json(base, params=params)
+            items = [Agent.from_dict(client, org, d) for d in data.get("results", [])]
+            pagination = data.get("pagination", {})
+            return PageResult(
+                items=items,
+                has_more=pagination.get("has_more", False),
+                next_offset=pagination.get("next_offset"),
+                max_per_page=pagination.get("max_per_page"),
+            )
+
+        return PaginatedIterator(fetch_page, limit=amount)
+
+    def get(self, name: str) -> Agent:
+        data = self._client._get_json(f"{self._base_path}/{name}")
+        return Agent.from_dict(self._client, self._org, data)
+
+    def create(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        metadata: dict[str, str] | None = None,
+    ) -> Agent:
+        body: dict[str, Any] = {"name": name, "description": description}
+        if metadata is not None:
+            body["metadata"] = metadata
+        data = self._client._post_json(self._base_path, json=body)
+        return Agent.from_dict(self._client, self._org, data)
 
     def delete(self, name: str) -> None:
-        """Delete an agent."""
         self._client._delete(f"{self._base_path}/{name}")

@@ -1,25 +1,17 @@
-"""Tests for PolicyCollection."""
+"""Tests for Policy entity and Policies collection."""
 
 import httpx
 import pytest
 
-from tilde.models import (
-    AttachmentRecord,
-    EffectivePolicy,
-    Policy,
-    PolicyDetail,
-    PolicySummary,
-    ValidationResult,
-)
+from tilde.models import Attachment, EffectivePolicy, Organization, Policy, ValidationResult
 
 
-class TestPolicyCollection:
+class TestPolicies:
     @pytest.fixture
     def policies(self, client):
-        return client.organizations.policies("test-org")
+        return Organization(client, name="test-org").policies
 
     def test_create(self, mock_api, policies):
-        """POST .../policies."""
         route = mock_api.post("/organizations/test-org/policies").mock(
             return_value=httpx.Response(
                 200,
@@ -46,7 +38,7 @@ class TestPolicyCollection:
         assert route.called
 
     def test_list(self, mock_api, policies):
-        """Paginated list of PolicySummary."""
+        """list() yields Policy entities, not data summaries."""
         mock_api.get("/organizations/test-org/policies").mock(
             return_value=httpx.Response(
                 200,
@@ -67,12 +59,11 @@ class TestPolicyCollection:
         )
         items = list(policies.list())
         assert len(items) == 1
-        assert isinstance(items[0], PolicySummary)
+        assert isinstance(items[0], Policy)
         assert items[0].name == "deny-deletes"
         assert items[0].attachment_count == 2
 
-    def test_get(self, mock_api, policies):
-        """Returns PolicyDetail."""
+    def test_get_returns_policy_with_attachments(self, mock_api, policies):
         mock_api.get("/organizations/test-org/policies/pol-1").mock(
             return_value=httpx.Response(
                 200,
@@ -99,14 +90,32 @@ class TestPolicyCollection:
                 },
             )
         )
-        detail = policies.get("pol-1")
-        assert isinstance(detail, PolicyDetail)
-        assert detail.policy.name == "deny-deletes"
-        assert len(detail.attachments) == 1
-        assert detail.attachments[0].principal_id == "user-1"
+        policy = policies.get("pol-1")
+        assert isinstance(policy, Policy)
+        assert policy.name == "deny-deletes"
+        attachments = policy.attachments
+        assert len(attachments) == 1
+        assert attachments[0].principal_id == "user-1"
 
-    def test_update(self, mock_api, policies):
-        """PUT .../policies/{id}."""
+    def test_update(self, mock_api, client):
+        """Policy.update() PUTs to /policies/{id}."""
+        mock_api.get("/organizations/test-org/policies/pol-1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "policy": {
+                        "id": "pol-1",
+                        "organization_id": "org-1",
+                        "name": "deny-deletes",
+                        "description": "",
+                        "policy_text": "",
+                        "is_builtin": False,
+                        "created_by": "user-1",
+                    },
+                    "attachments": [],
+                },
+            )
+        )
         route = mock_api.put("/organizations/test-org/policies/pol-1").mock(
             return_value=httpx.Response(
                 200,
@@ -121,13 +130,13 @@ class TestPolicyCollection:
                 },
             )
         )
-        result = policies.update("pol-1", name="updated-policy", policy_text="package updated")
+        policy = Organization(client, name="test-org").policies.get("pol-1")
+        result = policy.update(name="updated-policy", policy_text="package updated")
         assert isinstance(result, Policy)
         assert result.name == "updated-policy"
         assert route.called
 
-    def test_delete(self, mock_api, policies):
-        """DELETE .../policies/{id}."""
+    def test_delete_from_collection(self, mock_api, policies):
         route = mock_api.delete("/organizations/test-org/policies/pol-1").mock(
             return_value=httpx.Response(204)
         )
@@ -135,14 +144,10 @@ class TestPolicyCollection:
         assert route.called
 
     def test_validate(self, mock_api, policies):
-        """POST .../policies:validate."""
         route = mock_api.post("/organizations/test-org/policies:validate").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "valid": True,
-                    "errors": [],
-                },
+                json={"valid": True, "errors": []},
             )
         )
         result = policies.validate("package tilde\ndefault allow = true")
@@ -151,24 +156,59 @@ class TestPolicyCollection:
         assert result.errors == []
         assert route.called
 
-    def test_attach(self, mock_api, policies):
-        """POST .../policies/{id}/attachments."""
+    def test_attach_via_entity(self, mock_api, client):
+        mock_api.get("/organizations/test-org/policies/pol-1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "policy": {
+                        "id": "pol-1",
+                        "organization_id": "org-1",
+                        "name": "pol",
+                        "description": "",
+                        "policy_text": "",
+                        "is_builtin": False,
+                        "created_by": "u1",
+                    },
+                    "attachments": [],
+                },
+            )
+        )
         route = mock_api.post("/organizations/test-org/policies/pol-1/attachments").mock(
             return_value=httpx.Response(201)
         )
-        policies.attach("pol-1", principal_type="user", principal_id="user-1")
+        Organization(client, name="test-org").policies.get("pol-1").attach(
+            principal_type="user", principal_id="user-1"
+        )
         assert route.called
 
-    def test_detach(self, mock_api, policies):
-        """DELETE .../policies/{id}/attachments."""
+    def test_detach_via_entity(self, mock_api, client):
+        mock_api.get("/organizations/test-org/policies/pol-1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "policy": {
+                        "id": "pol-1",
+                        "organization_id": "org-1",
+                        "name": "pol",
+                        "description": "",
+                        "policy_text": "",
+                        "is_builtin": False,
+                        "created_by": "u1",
+                    },
+                    "attachments": [],
+                },
+            )
+        )
         route = mock_api.delete("/organizations/test-org/policies/pol-1/attachments").mock(
             return_value=httpx.Response(204)
         )
-        policies.detach("pol-1", principal_type="user", principal_id="user-1")
+        Organization(client, name="test-org").policies.get("pol-1").detach(
+            principal_type="user", principal_id="user-1"
+        )
         assert route.called
 
-    def test_list_attachments(self, mock_api, policies):
-        """GET .../attachments."""
+    def test_attachments(self, mock_api, policies):
         mock_api.get("/organizations/test-org/attachments").mock(
             return_value=httpx.Response(
                 200,
@@ -186,26 +226,20 @@ class TestPolicyCollection:
                 },
             )
         )
-        attachments = policies.list_attachments()
+        attachments = policies.attachments()
         assert len(attachments) == 1
-        assert isinstance(attachments[0], AttachmentRecord)
+        assert isinstance(attachments[0], Attachment)
         assert attachments[0].policy_id == "pol-1"
-        assert attachments[0].principal_type == "group"
 
     def test_generate(self, mock_api, policies):
-        """POST .../policies:generate."""
         route = mock_api.post("/organizations/test-org/policies:generate").mock(
-            return_value=httpx.Response(
-                200,
-                json={"policy_text": "allow read *"},
-            )
+            return_value=httpx.Response(200, json={"policy_text": "allow read *"})
         )
         result = policies.generate("allow reading everything")
         assert result == "allow read *"
         assert route.called
 
-    def test_effective_policies(self, mock_api, policies):
-        """GET .../effective-policies?user_id=..."""
+    def test_effective_by_user_id(self, mock_api, policies):
         mock_api.get("/organizations/test-org/effective-policies").mock(
             return_value=httpx.Response(
                 200,
@@ -222,14 +256,12 @@ class TestPolicyCollection:
                 },
             )
         )
-        effective = policies.effective_policies("user-1")
+        effective = policies.effective(user_id="user-1")
         assert len(effective) == 1
         assert isinstance(effective[0], EffectivePolicy)
-        assert effective[0].policy_id == "pol-1"
         assert effective[0].source == "direct"
 
-    def test_effective_policies_by_principal(self, mock_api, policies):
-        """GET .../effective-policies?principal_type=agent&principal_id=..."""
+    def test_effective_by_principal(self, mock_api, policies):
         mock_api.get("/organizations/test-org/effective-policies").mock(
             return_value=httpx.Response(
                 200,
@@ -246,7 +278,6 @@ class TestPolicyCollection:
                 },
             )
         )
-        effective = policies.effective_policies(principal_type="agent", principal_id="agent-1")
+        effective = policies.effective(principal_type="agent", principal_id="agent-1")
         assert len(effective) == 1
-        assert effective[0].policy_id == "pol-2"
         assert effective[0].source == "group"

@@ -1,11 +1,11 @@
-"""Tests for OrganizationCollection and MemberCollection."""
+"""Tests for Organizations and Members."""
 
 import httpx
 
-from tilde.models import Membership, Organization
+from tilde.models import Member, Organization
 
 
-class TestOrganizationCollection:
+class TestOrganizations:
     def test_create(self, mock_api, client):
         """POST /organizations."""
         route = mock_api.post("/organizations").mock(
@@ -39,7 +39,7 @@ class TestOrganizationCollection:
                 },
             )
         )
-        orgs = client.organizations.list()
+        orgs = list(client.organizations.list())
         assert len(orgs) == 2
         assert all(isinstance(o, Organization) for o in orgs)
         assert orgs[0].name == "org-one"
@@ -64,7 +64,7 @@ class TestOrganizationCollection:
         assert org.display_name == "Test Organization"
 
 
-class TestMemberCollection:
+class TestMembers:
     def test_members_list(self, mock_api, client):
         """GET /organizations/test-org/members."""
         mock_api.get("/organizations/test-org/members").mock(
@@ -86,25 +86,41 @@ class TestMemberCollection:
                 },
             )
         )
-        members = client.organizations.members("test-org").list()
+        org = Organization(client, name="test-org")
+        members = list(org.members.list())
         assert len(members) == 2
-        assert all(isinstance(m, Membership) for m in members)
+        assert all(isinstance(m, Member) for m in members)
         assert members[0].user_id == "user-1"
         assert members[0].username == "alice"
         assert members[1].username == "bob"
 
-    def test_members_add(self, mock_api, client):
-        """POST /organizations/test-org/members."""
-        route = mock_api.post("/organizations/test-org/members").mock(
-            return_value=httpx.Response(201)
+    def test_members_create_returns_member(self, mock_api, client):
+        """POST /organizations/test-org/members followed by GET for the returned entity."""
+        mock_api.post("/organizations/test-org/members").mock(return_value=httpx.Response(201))
+        mock_api.get("/organizations/test-org/members").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "organization_id": "org-1",
+                            "user_id": "user-1",
+                            "username": "alice",
+                        },
+                    ],
+                },
+            )
         )
-        client.organizations.members("test-org").add("alice")
-        assert route.called
+        org = Organization(client, name="test-org")
+        member = org.members.create("alice")
+        assert isinstance(member, Member)
+        assert member.username == "alice"
 
-    def test_members_remove(self, mock_api, client):
+    def test_members_delete(self, mock_api, client):
         """DELETE /organizations/test-org/members/{user_id}."""
         route = mock_api.delete("/organizations/test-org/members/user-3").mock(
             return_value=httpx.Response(204)
         )
-        client.organizations.members("test-org").remove("user-3")
+        org = Organization(client, name="test-org")
+        org.members.delete("user-3")
         assert route.called

@@ -24,7 +24,7 @@ from tilde.exceptions import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from tilde.resources.organizations import OrganizationCollection, OrgResource
+    from tilde.resources.organizations import Organizations
     from tilde.resources.repositories import Repository
 
 
@@ -40,9 +40,11 @@ class Client:
         credentials_provider: Dynamic credentials source (e.g.
             :class:`~tilde._credentials.SandboxCredentialsProvider`).  When
             provided, its token is used instead of ``api_key`` for outgoing
-            requests.  If omitted, the client auto-detects
-            ``TILDE_SANDBOX_CREDENTIALS_URI`` (sandbox IMDS) and instantiates
-            a provider on its own unless an explicit ``api_key`` is supplied.
+            requests.  If omitted and no static API key is configured
+            (``api_key`` param, ``TILDE_API_KEY``, or ``~/.tilde/config.yaml``),
+            the client auto-detects ``TILDE_SANDBOX_CREDENTIALS_URI`` and
+            instantiates a sandbox IMDS provider.  A static key always wins
+            over auto-detection so it is not silently overridden.
         extra_user_agent: Additional User-Agent segments appended after the
             SDK identifier (e.g. ``"my-app/0.1.0 claude-desktop/1.2"``).
         httpx_client: Optional pre-configured ``httpx.Client`` for testing.
@@ -209,7 +211,11 @@ class Client:
     # -- Resource access -----------------------------------------------------
 
     def repository(self, repo_path: str) -> Repository:
-        """Get a :class:`~tilde.resources.repositories.Repository` resource.
+        """Return a :class:`~tilde.resources.repositories.Repository` for *repo_path*.
+
+        ``tilde.repository('org/repo')`` is the only shorthand in the SDK —
+        every other entity is reached through the ``organizations`` chain
+        (``client.organizations.get('org').repositories.get('repo')``).
 
         Args:
             repo_path: Repository path in ``"org/repo"`` format.
@@ -221,18 +227,12 @@ class Client:
             raise ValueError(f"Invalid repository path {repo_path!r}: expected 'org/repo' format")
         return Repository(self, parts[0], parts[1])
 
-    def organization(self, org: str) -> OrgResource:
-        """Get an :class:`~tilde.resources.organizations.OrgResource` for fluent access."""
-        from tilde.resources.organizations import OrgResource
-
-        return OrgResource(self, org)
-
     @property
-    def organizations(self) -> OrganizationCollection:
-        """Access the organizations API."""
-        from tilde.resources.organizations import OrganizationCollection
+    def organizations(self) -> Organizations:
+        """The :class:`~tilde.resources.organizations.Organizations` collection."""
+        from tilde.resources.organizations import Organizations
 
-        return OrganizationCollection(self)
+        return Organizations(self)
 
     # -- Lifecycle -----------------------------------------------------------
 
@@ -258,19 +258,18 @@ def _resolve_credentials_provider(
 ) -> SandboxCredentialsProvider | None:
     """Pick the credentials provider to use for a new client.
 
-    An explicit provider always wins.  An explicit ``api_key`` suppresses
-    auto-detection so callers that deliberately pass a static key are never
-    hijacked by the sandbox IMDS env var.  Otherwise, when
-    ``TILDE_SANDBOX_CREDENTIALS_URI`` is set, a provider is instantiated —
-    this matches the ECS-style convention of preferring the metadata endpoint
-    over any static env/file credentials that happen to also be present.
+    Precedence: an explicit provider always wins; otherwise any statically
+    configured ``api_key`` (explicit ``Client(api_key=...)``, ``TILDE_API_KEY``,
+    or ``~/.tilde/config.yaml``) suppresses auto-detection.  This matches the
+    principle that credentials set deliberately by the caller should not be
+    silently overridden by the sandbox IMDS env var.  Only when no static key
+    is available does ``TILDE_SANDBOX_CREDENTIALS_URI`` kick in.
     """
     if explicit_provider is not None:
         return explicit_provider
-    if explicit_api_key is not None:
+    if explicit_api_key is not None or config_api_key is not None:
         return None
     uri = os.environ.get(ENV_SANDBOX_CREDENTIALS_URI)
     if uri:
         return SandboxCredentialsProvider(uri)
-    _ = config_api_key
     return None

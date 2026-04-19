@@ -231,6 +231,62 @@ class TestItemsYieldedOneAtATime:
         assert calls == [None]
 
 
+class TestLimit:
+    def test_limit_caps_total_items_within_single_page(self):
+        def fetch(after):
+            return PageResult(items=[1, 2, 3, 4, 5], has_more=False, next_offset=None)
+
+        it = PaginatedIterator(fetch, limit=3)
+        assert list(it) == [1, 2, 3]
+
+    def test_limit_caps_total_items_across_pages(self):
+        def fetch(after):
+            if after is None:
+                return PageResult(items=[1, 2], has_more=True, next_offset="p2")
+            return PageResult(items=[3, 4], has_more=True, next_offset="p3")
+
+        it = PaginatedIterator(fetch, limit=3)
+        assert list(it) == [1, 2, 3]
+
+    def test_limit_none_means_unlimited(self):
+        def fetch(after):
+            return PageResult(items=[1, 2, 3], has_more=False, next_offset=None)
+
+        it = PaginatedIterator(fetch, limit=None)
+        assert list(it) == [1, 2, 3]
+
+    def test_limit_zero_yields_nothing_and_does_not_fetch(self):
+        calls = []
+
+        def fetch(after):
+            calls.append(after)
+            return PageResult(items=[1, 2], has_more=False, next_offset=None)
+
+        it = PaginatedIterator(fetch, limit=0)
+        assert list(it) == []
+        assert calls == []
+
+    def test_limit_larger_than_available_returns_all(self):
+        def fetch(after):
+            return PageResult(items=[1, 2], has_more=False, next_offset=None)
+
+        it = PaginatedIterator(fetch, limit=10)
+        assert list(it) == [1, 2]
+
+    def test_limit_stops_before_fetching_next_page(self):
+        calls = []
+
+        def fetch(after):
+            calls.append(after)
+            if after is None:
+                return PageResult(items=[1, 2], has_more=True, next_offset="p2")
+            return PageResult(items=[3, 4], has_more=False, next_offset=None)
+
+        it = PaginatedIterator(fetch, limit=2)
+        assert list(it) == [1, 2]
+        assert calls == [None]
+
+
 class TestPageResultFields:
     def test_max_per_page_field(self):
         page = PageResult(

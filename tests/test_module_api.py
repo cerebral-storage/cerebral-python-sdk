@@ -45,8 +45,9 @@ class TestModuleAPI:
         tilde._default_client = None
 
     def test_exception_exports(self):
-        """All exception classes are importable from tilde."""
-        from tilde import (
+        """Exception classes live in tilde.exceptions, not tilde."""
+        import tilde
+        from tilde.exceptions import (
             APIError,
             AuthenticationError,
             BadRequestError,
@@ -76,16 +77,30 @@ class TestModuleAPI:
         assert issubclass(PreconditionFailedError, APIError)
         assert issubclass(LockedError, APIError)
         assert issubclass(ServerError, APIError)
+        # Not re-exported at the top level.
+        assert not hasattr(tilde, "NotFoundError")
 
-    def test_model_exports(self):
-        """Key models are importable from tilde."""
-        from tilde import (
-            CommitData,
-            ImportJob,
-            Organization,
-        )
+    def test_entity_exports(self):
+        """Entity classes live in tilde.models, not tilde."""
+        import tilde
+        from tilde.models import Commit, ImportJob, Organization, Repository
 
-        # Spot-check a few are actual types
         assert isinstance(Organization.__name__, str)
-        assert isinstance(CommitData.__name__, str)
+        assert isinstance(Repository.__name__, str)
+        assert isinstance(Commit.__name__, str)
         assert isinstance(ImportJob.__name__, str)
+        # Not re-exported at the top level.
+        assert not hasattr(tilde, "Organization")
+        assert not hasattr(tilde, "Repository")
+
+    def test_top_level_surface(self):
+        """Only the advertised names appear on the tilde module."""
+        import tilde
+
+        names = set(dir(tilde))
+        # These must exist.
+        assert {"Client", "configure", "organizations", "repository", "__version__"} <= names
+        # These must NOT be at the top level — they live in tilde.models /
+        # tilde.exceptions.
+        for banned in ("Organization", "Repository", "NotFoundError", "Agent"):
+            assert banned not in names, f"{banned} should not be at tilde top level"

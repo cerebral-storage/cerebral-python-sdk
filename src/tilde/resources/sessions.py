@@ -7,12 +7,12 @@ import warnings
 from typing import TYPE_CHECKING, Any
 
 from tilde._pagination import DEFAULT_PAGE_SIZE, PageResult, PaginatedIterator
+from tilde._value_types import CommitResult, EntryRecord
 from tilde.exceptions import NotFoundError
-from tilde.models import CommitResult, EntryRecord
 
 if TYPE_CHECKING:
     from tilde.client import Client
-    from tilde.resources.objects import SessionObjectCollection
+    from tilde.resources.objects import SessionObjects
 
 _APPROVAL_POLL_INTERVAL = 2  # seconds
 
@@ -63,11 +63,11 @@ class Session:
         return f"/organizations/{self._org}/repositories/{self._repo}"
 
     @property
-    def objects(self) -> SessionObjectCollection:
+    def objects(self) -> SessionObjects:
         """Object access within this session (read and write)."""
-        from tilde.resources.objects import SessionObjectCollection
+        from tilde.resources.objects import SessionObjects
 
-        return SessionObjectCollection(self._client, self._org, self._repo, self._session_id)
+        return SessionObjects(self._client, self._org, self._repo, self._session_id)
 
     def uncommitted(
         self,
@@ -75,8 +75,13 @@ class Session:
         prefix: str | None = None,
         after: str | None = None,
         amount: int | None = None,
+        page_size: int | None = None,
     ) -> PaginatedIterator[EntryRecord]:
-        """List uncommitted changes in this session."""
+        """List uncommitted changes in this session.
+
+        ``amount`` caps the total number of results yielded by the iterator.
+        ``page_size`` sets the server-side page size used for each request.
+        """
         initial_after = after
 
         def fetch_page(cursor: str | None) -> PageResult[EntryRecord]:
@@ -86,10 +91,7 @@ class Session:
                 params["after"] = effective_after
             if prefix is not None:
                 params["prefix"] = prefix
-            if amount is not None:
-                params["amount"] = amount
-            else:
-                params["amount"] = DEFAULT_PAGE_SIZE
+            params["amount"] = page_size if page_size is not None else DEFAULT_PAGE_SIZE
             data = self._client._get_json(f"{self._repo_path}/changes", params=params)
             items = [EntryRecord.from_dict(d) for d in data.get("results", [])]
             pagination = data.get("pagination", {})
@@ -100,7 +102,7 @@ class Session:
                 max_per_page=pagination.get("max_per_page"),
             )
 
-        return PaginatedIterator(fetch_page)
+        return PaginatedIterator(fetch_page, limit=amount)
 
     def commit(
         self,

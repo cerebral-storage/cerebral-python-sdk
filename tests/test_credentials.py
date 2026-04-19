@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -21,7 +21,7 @@ METADATA_URL = "http://169.254.170.2/v1/credentials"
 
 
 def _payload(token: str = "tst-abc", expires_in: int = 900, **extra: object) -> dict[str, object]:
-    expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
     body: dict[str, object] = {
         "access_token": token,
         "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
@@ -226,6 +226,31 @@ class TestClientIntegration:
             client._get_json("/healthcheck")
         auth = mock_api.calls.last.request.headers["authorization"]
         assert auth == "Bearer explicit-key"
+
+    def test_env_api_key_disables_autodetect(self, mock_api, monkeypatch):
+        # TILDE_API_KEY is an explicit caller choice and must not be silently
+        # overridden by the sandbox IMDS env var.
+        monkeypatch.setenv("TILDE_API_KEY", "env-key")
+        monkeypatch.setenv(ENV_SANDBOX_CREDENTIALS_URI, METADATA_URL)
+        mock_api.get("/healthcheck").mock(return_value=Response(200, json={"ok": True}))
+        with Client() as client:
+            assert client._credentials_provider is None
+            client._get_json("/healthcheck")
+        auth = mock_api.calls.last.request.headers["authorization"]
+        assert auth == "Bearer env-key"
+
+    def test_config_file_api_key_disables_autodetect(self, mock_api, monkeypatch, tmp_path):
+        # ~/.tilde/config.yaml is also a deliberate caller choice; it wins
+        # over auto-detection for the same reason as TILDE_API_KEY.
+        monkeypatch.delenv("TILDE_API_KEY", raising=False)
+        monkeypatch.setenv(ENV_SANDBOX_CREDENTIALS_URI, METADATA_URL)
+        (tmp_path / "config.yaml").write_text("api_key: file-key\n", encoding="utf-8")
+        mock_api.get("/healthcheck").mock(return_value=Response(200, json={"ok": True}))
+        with Client() as client:
+            assert client._credentials_provider is None
+            client._get_json("/healthcheck")
+        auth = mock_api.calls.last.request.headers["authorization"]
+        assert auth == "Bearer file-key"
 
     def test_api_url_env_var_sets_endpoint(self, monkeypatch):
         monkeypatch.delenv("TILDE_ENDPOINT_URL", raising=False)
