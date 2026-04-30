@@ -133,7 +133,6 @@ class ReadOnlyObjects:
         path: str,
         *,
         cache: bool = True,
-        presign: bool = True,
         byte_range: tuple[int, int | None] | None = None,
     ) -> ObjectReader:
         """Get an object's content as a streaming reader.
@@ -142,7 +141,6 @@ class ReadOnlyObjects:
             path: Object path.
             cache: Cache content in memory after first read (default ``True``).
                 For large objects, use ``cache=False`` and ``.iter_bytes()``.
-            presign: Use presigned URL for download (default ``True``).
             byte_range: Optional ``(start, end)`` byte range for partial reads.
                 For example, ``(0, 1023)`` requests the first 1024 bytes.
                 Use ``(offset, None)`` to read from *offset* to the end.
@@ -155,7 +153,6 @@ class ReadOnlyObjects:
             f"{self._repo_path}/object",
             {"path": path},
             cache=cache,
-            presign=presign,
             byte_range=byte_range,
         )
 
@@ -241,7 +238,6 @@ class SessionObjects:
         path: str,
         *,
         cache: bool = True,
-        presign: bool = True,
         byte_range: tuple[int, int | None] | None = None,
     ) -> ObjectReader:
         """Get an object's content as a streaming reader."""
@@ -250,7 +246,6 @@ class SessionObjects:
             f"{self._repo_path}/object",
             {"session_id": self._session_id, "path": path},
             cache=cache,
-            presign=presign,
             byte_range=byte_range,
         )
 
@@ -303,7 +298,7 @@ class SessionObjects:
             ) or self._client._multipart_unsupported
 
             if use_single:
-                return self._put_single(path, data)
+                return self._put_single(path, data, size=size)
 
             # Attempt multipart
             try:
@@ -314,7 +309,7 @@ class SessionObjects:
                     # Reset stream position if possible
                     if hasattr(data, "seek"):
                         data.seek(0)
-                    return self._put_single(path, data)
+                    return self._put_single(path, data, size=size)
                 raise
         finally:
             if fh is not None:
@@ -324,16 +319,16 @@ class SessionObjects:
         self,
         path: str,
         data: bytes | bytearray | memoryview | BinaryIO | Iterable[bytes],
+        *,
+        size: int | None = None,
     ) -> PutObjectResult:
-        """Upload via single presigned URL (stage → upload → finalize)."""
-        stage = self._client._post_json(
-            f"{self._repo_path}/object/stage",
+        """Upload via single presigned URL (PUT /object → upload → finalize)."""
+        stage = self._client._put_json(
+            f"{self._repo_path}/object",
             params={"session_id": self._session_id, "path": path},
         )
         upload_url: str = stage["upload_url"]
-        physical_address: str = stage["physical_address"]
-        signature: str = stage["signature"]
-        expires_at: str = stage["expires_at"]
+        upload_token: str = stage["upload_token"]
 
         if isinstance(data, (bytes, bytearray, memoryview)):
             content: bytes | BinaryIO | Iterable[bytes] = bytes(data)
@@ -353,18 +348,23 @@ class SessionObjects:
                 f"Upload to presigned URL failed with status {upload_resp.status_code}"
             )
 
-        finalize = self._client._put_json(
+        # ETag from the storage backend is the content checksum (MD5 for S3, quoted)
+        etag = upload_resp.headers.get("ETag", "")
+        checksum = etag.strip('"')
+
+        finalize_body: dict[str, object] = {
+            "upload_token": upload_token,
+            "content_type": "application/octet-stream",
+        }
+        if checksum:
+            finalize_body["checksum"] = checksum
+        if size is not None:
+            finalize_body["size_bytes"] = size
+
+        finalize = self._client._post_json(
             f"{self._repo_path}/object/finalize",
-            params={
-                "session_id": self._session_id,
-                "path": path,
-                "expires_at": expires_at,
-            },
-            json={
-                "physical_address": physical_address,
-                "signature": signature,
-                "content_type": "application/octet-stream",
-            },
+            params={"session_id": self._session_id, "path": path},
+            json=finalize_body,
         )
         return PutObjectResult.from_dict(finalize)
 
@@ -380,30 +380,24 @@ class SessionObjects:
             params={"session_id": self._session_id, "path": path},
         )
         upload_id: str = initiate["upload_id"]
-        physical_address: str = initiate["physical_address"]
-        token: str = initiate["token"]
+        upload_token: str = initiate["upload_token"]
 
         parts: list[dict[str, object]] = []
         total_size = 0
 
         try:
             for part_number, chunk in _iter_parts(data):
-                # 2. Get presigned URL for this part
-                part_resp = self._client._http.get(
+                # 2. Get presigned URL for this part (JSON response)
+                part_data = self._client._get_json(
                     f"{self._repo_path}/object/multipart/part",
                     params={
-                        "token": token,
-                        "part_number": part_number,
+                        "session_id": self._session_id,
+                        "path": path,
                         "upload_id": upload_id,
+                        "part_number": part_number,
                     },
-                    headers=self._client._auth_headers(),
-                    follow_redirects=False,
                 )
-                if part_resp.status_code not in (301, 302, 307, 308):
-                    raise TransportError(
-                        f"Expected redirect for part upload, got {part_resp.status_code}"
-                    )
-                presigned_url = part_resp.headers["Location"]
+                presigned_url: str = part_data["upload_url"]
 
                 # Upload part to presigned URL
                 try:
@@ -430,12 +424,11 @@ class SessionObjects:
                 f"{self._repo_path}/object/multipart/complete",
                 params={"session_id": self._session_id, "path": path},
                 json={
-                    "token": token,
                     "upload_id": upload_id,
-                    "physical_address": physical_address,
+                    "upload_token": upload_token,
                     "parts": parts,
-                    "total_size": total_size,
                     "content_type": "application/octet-stream",
+                    "size_bytes": total_size,
                 },
             )
             return PutObjectResult.from_dict(complete)
@@ -443,13 +436,12 @@ class SessionObjects:
         except Exception:
             # Abort on any failure
             with contextlib.suppress(Exception):
-                self._client._post(
-                    f"{self._repo_path}/object/multipart/abort",
-                    params={"session_id": self._session_id, "path": path},
-                    json={
-                        "token": token,
+                self._client._delete(
+                    f"{self._repo_path}/object/multipart",
+                    params={
+                        "session_id": self._session_id,
+                        "path": path,
                         "upload_id": upload_id,
-                        "physical_address": physical_address,
                     },
                 )
             raise

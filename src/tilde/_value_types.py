@@ -80,12 +80,10 @@ class SourceMetadata:
 @_compact_repr
 @dataclass(slots=True)
 class Entry:
-    address: str = ""
     last_modified: datetime | None = None
     size: int | None = None
     e_tag: str = ""
     metadata: dict[str, str] = field(default_factory=dict)
-    address_type: int | None = None
     content_type: str = ""
     source_metadata: SourceMetadata | None = None
 
@@ -93,12 +91,10 @@ class Entry:
     def from_dict(cls, d: dict[str, Any]) -> Entry:
         sm = d.get("source_metadata")
         return cls(
-            address=d.get("address", ""),
             last_modified=_parse_dt(d.get("last_modified")),
             size=d.get("size"),
             e_tag=d.get("e_tag", ""),
             metadata=d.get("metadata", {}),
-            address_type=d.get("address_type"),
             content_type=d.get("content_type", ""),
             source_metadata=SourceMetadata.from_dict(sm) if sm else None,
         )

@@ -37,14 +37,12 @@ class ObjectReader:
         params: dict[str, str],
         *,
         cache: bool = True,
-        presign: bool = True,
         byte_range: tuple[int, int | None] | None = None,
     ) -> None:
         self._client = client
         self._path = path
         self._params = params
         self._cache = cache
-        self._presign = presign
         self._byte_range = byte_range
         self._response: httpx.Response | None = None
         self._stream_context: AbstractContextManager[Any] | None = None
@@ -60,10 +58,7 @@ class ObjectReader:
         if self._response is not None:
             return self._response
         params = dict(self._params)
-        kwargs: dict[str, Any] = {}
-        if self._presign:
-            params["presign"] = "true"
-            kwargs["follow_redirects"] = True
+        kwargs: dict[str, Any] = {"follow_redirects": True}
         if self._byte_range is not None:
             start, end = self._byte_range
             range_val = f"bytes={start}-{end}" if end is not None else f"bytes={start}-"

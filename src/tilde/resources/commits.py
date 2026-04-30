@@ -190,14 +190,16 @@ class Commit:
         ``page_size`` sets the server-side page size used for each request.
         """
         self._ensure_loaded()
-        left = self._parents[0] if self._parents else ""
+        left = self._parents[0] if self._parents else None
         right = self.id
         initial_after = after
         repo_path = self._repo_path
         client = self._client
 
         def fetch_page(cursor: str | None) -> PageResult[ListingEntry]:
-            params: dict[str, str | int] = {"left": left, "right": right}
+            params: dict[str, str | int] = {"right": right}
+            if left is not None:
+                params["left"] = left
             effective_after = cursor if cursor is not None else initial_after
             if effective_after is not None:
                 params["after"] = effective_after

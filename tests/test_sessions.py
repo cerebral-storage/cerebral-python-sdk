@@ -208,7 +208,6 @@ class TestSessionUncommitted:
                         {
                             "path": "staged.txt",
                             "entry": {
-                                "address": "addr-staged",
                                 "size": 300,
                                 "e_tag": "etag-s",
                                 "content_type": "text/plain",

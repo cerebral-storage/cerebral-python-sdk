@@ -125,7 +125,6 @@ class TestCommitEntity:
                             "type": "object",
                             "status": "modified",
                             "entry": {
-                                "address": "addr1",
                                 "size": 100,
                                 "e_tag": "etag1",
                                 "content_type": "text/plain",
@@ -136,7 +135,6 @@ class TestCommitEntity:
                             "type": "object",
                             "status": "added",
                             "entry": {
-                                "address": "addr2",
                                 "size": 50,
                                 "e_tag": "etag2",
                                 "content_type": "text/plain",

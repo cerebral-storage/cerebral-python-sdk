@@ -17,7 +17,6 @@ class TestReadOnlyObjects:
                             "path": "file1.txt",
                             "type": "object",
                             "entry": {
-                                "address": "addr1",
                                 "size": 100,
                                 "e_tag": "etag1",
                                 "content_type": "text/plain",
@@ -27,7 +26,6 @@ class TestReadOnlyObjects:
                             "path": "file2.csv",
                             "type": "object",
                             "entry": {
-                                "address": "addr2",
                                 "size": 200,
                                 "e_tag": "etag2",
                                 "content_type": "text/csv",
@@ -86,7 +84,6 @@ class TestSessionObjects:
                             "path": "file1.txt",
                             "type": "object",
                             "entry": {
-                                "address": "addr1",
                                 "size": 100,
                                 "e_tag": "etag1",
                                 "content_type": "text/plain",
@@ -146,27 +143,23 @@ class TestSessionObjects:
         assert meta.etag == '"abc123"'
 
     def test_put_small_uses_single_upload(self, mock_api, repo):
-        """Data < 64 MB uses stage/finalize (single presigned upload)."""
+        """Data < 64 MB uses PUT /object → upload → POST /object/finalize."""
         mock_api.post("/organizations/test-org/repositories/test-repo/sessions").mock(
             return_value=httpx.Response(201, json={"session_id": "sess-obj-4"})
         )
-        stage_route = mock_api.post(
-            "/organizations/test-org/repositories/test-repo/object/stage"
-        ).mock(
+        stage_route = mock_api.put("/organizations/test-org/repositories/test-repo/object").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "upload_url": "https://s3.example.com/bucket/obj123",
-                    "physical_address": "s3://bucket/obj123",
-                    "signature": "sig-abc",
-                    "expires_at": "2026-02-24T00:00:00Z",
+                    "upload_token": "tok-abc",
                 },
             )
         )
         upload_route = mock_api.put(url="https://s3.example.com/bucket/obj123").mock(
-            return_value=httpx.Response(200)
+            return_value=httpx.Response(200, headers={"ETag": '"abc123md5"'})
         )
-        finalize_route = mock_api.put(
+        finalize_route = mock_api.post(
             "/organizations/test-org/repositories/test-repo/object/finalize"
         ).mock(
             return_value=httpx.Response(
@@ -182,6 +175,14 @@ class TestSessionObjects:
         assert stage_route.called
         assert upload_route.called
         assert finalize_route.called
+        # Checksum comes from the upload response ETag (quotes stripped)
+        finalize_body = finalize_route.calls[0].request.read()
+        import json
+
+        body = json.loads(finalize_body)
+        assert body["checksum"] == "abc123md5"
+        assert body["upload_token"] == "tok-abc"
+        assert body["size_bytes"] == len(b"hello world")
 
     def test_put_defaults_to_multipart(self, mock_api, repo):
         """Data >= 64 MB or unknown size triggers multipart flow."""
@@ -196,17 +197,15 @@ class TestSessionObjects:
                 200,
                 json={
                     "upload_id": "mp-upload-1",
-                    "physical_address": "s3://bucket/mp-obj",
-                    "token": "mp-token-1",
-                    "expires_at": "2026-02-24T00:00:00Z",
+                    "upload_token": "mp-token-1",
                 },
             )
         )
-        # Part presigned URL redirect
+        # Part presigned URL (JSON response)
         mock_api.get("/organizations/test-org/repositories/test-repo/object/multipart/part").mock(
             return_value=httpx.Response(
-                307,
-                headers={"Location": "https://s3.example.com/bucket/mp-obj?partNumber=1"},
+                200,
+                json={"upload_url": "https://s3.example.com/bucket/mp-obj?partNumber=1"},
             )
         )
         # Part upload
@@ -242,24 +241,20 @@ class TestSessionObjects:
         mock_api.post("/organizations/test-org/repositories/test-repo/object/multipart").mock(
             return_value=httpx.Response(501, json={"message": "Multipart not supported"})
         )
-        # Fallback: stage/finalize
-        stage_route = mock_api.post(
-            "/organizations/test-org/repositories/test-repo/object/stage"
-        ).mock(
+        # Fallback: PUT /object → upload → POST /object/finalize
+        stage_route = mock_api.put("/organizations/test-org/repositories/test-repo/object").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "upload_url": "https://s3.example.com/bucket/fallback",
-                    "physical_address": "s3://bucket/fallback",
-                    "signature": "sig-fallback",
-                    "expires_at": "2026-02-24T00:00:00Z",
+                    "upload_token": "tok-fallback",
                 },
             )
         )
         mock_api.put(url="https://s3.example.com/bucket/fallback").mock(
             return_value=httpx.Response(200)
         )
-        mock_api.put("/organizations/test-org/repositories/test-repo/object/finalize").mock(
+        mock_api.post("/organizations/test-org/repositories/test-repo/object/finalize").mock(
             return_value=httpx.Response(201, json={"path": "bigfile.bin", "etag": "fallback-etag"})
         )
 
@@ -273,7 +268,7 @@ class TestSessionObjects:
         assert repo._client._multipart_unsupported is True
 
     def test_put_multipart_abort_on_failure(self, mock_api, repo):
-        """If part upload fails, abort is called and error re-raised."""
+        """If part upload fails, abort (DELETE /object/multipart) is called and error re-raised."""
         mock_api.post("/organizations/test-org/repositories/test-repo/sessions").mock(
             return_value=httpx.Response(201, json={"session_id": "sess-mp-3"})
         )
@@ -282,26 +277,24 @@ class TestSessionObjects:
                 200,
                 json={
                     "upload_id": "mp-upload-fail",
-                    "physical_address": "s3://bucket/mp-fail",
-                    "token": "mp-token-fail",
-                    "expires_at": "2026-02-24T00:00:00Z",
+                    "upload_token": "mp-token-fail",
                 },
             )
         )
-        # Part redirect succeeds
+        # Part URL (JSON response) succeeds
         mock_api.get("/organizations/test-org/repositories/test-repo/object/multipart/part").mock(
             return_value=httpx.Response(
-                307,
-                headers={"Location": "https://s3.example.com/bucket/mp-fail?partNumber=1"},
+                200,
+                json={"upload_url": "https://s3.example.com/bucket/mp-fail?partNumber=1"},
             )
         )
         # Part upload fails
         mock_api.put(url="https://s3.example.com/bucket/mp-fail?partNumber=1").mock(
             return_value=httpx.Response(500)
         )
-        # Abort should be called
-        abort_route = mock_api.post(
-            "/organizations/test-org/repositories/test-repo/object/multipart/abort"
+        # Abort should be called (DELETE /object/multipart)
+        abort_route = mock_api.delete(
+            "/organizations/test-org/repositories/test-repo/object/multipart"
         ).mock(return_value=httpx.Response(204))
 
         session = repo.session()

@@ -209,52 +209,8 @@ class TestClose:
 
 
 class TestPresign:
-    def test_presign_true_adds_param_and_follow_redirects(self):
-        """Default presign=True adds presign=true param and follow_redirects."""
-        captured_kwargs = {}
-
-        @contextmanager
-        def mock_stream(method, path, **kwargs):
-            captured_kwargs.update(kwargs)
-            mock_response = MagicMock(spec=httpx.Response)
-            mock_response.headers = httpx.Headers({})
-            mock_response.read.return_value = b"data"
-            mock_response.close = MagicMock()
-            yield mock_response
-
-        client = MagicMock()
-        client._stream = mock_stream
-
-        reader = ObjectReader(client, "/objects/foo", params={"path": "bar"}, presign=True)
-        reader.read()
-
-        assert captured_kwargs["params"]["presign"] == "true"
-        assert captured_kwargs["follow_redirects"] is True
-
-    def test_presign_false_omits_param_and_follow_redirects(self):
-        """presign=False does not add presign param or follow_redirects."""
-        captured_kwargs = {}
-
-        @contextmanager
-        def mock_stream(method, path, **kwargs):
-            captured_kwargs.update(kwargs)
-            mock_response = MagicMock(spec=httpx.Response)
-            mock_response.headers = httpx.Headers({})
-            mock_response.read.return_value = b"data"
-            mock_response.close = MagicMock()
-            yield mock_response
-
-        client = MagicMock()
-        client._stream = mock_stream
-
-        reader = ObjectReader(client, "/objects/foo", params={"path": "bar"}, presign=False)
-        reader.read()
-
-        assert "presign" not in captured_kwargs["params"]
-        assert "follow_redirects" not in captured_kwargs
-
-    def test_presign_default_is_true(self):
-        """presign defaults to True."""
+    def test_always_follows_redirects(self):
+        """ObjectReader always follows redirects (server returns 307 for object downloads)."""
         captured_kwargs = {}
 
         @contextmanager
@@ -272,8 +228,8 @@ class TestPresign:
         reader = ObjectReader(client, "/objects/foo", params={"path": "bar"})
         reader.read()
 
-        assert captured_kwargs["params"]["presign"] == "true"
         assert captured_kwargs["follow_redirects"] is True
+        assert "presign" not in captured_kwargs["params"]
 
 
 class TestRangeRequests:
